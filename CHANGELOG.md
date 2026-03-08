@@ -1,3 +1,9 @@
+## 3.1.4+1 (DLCT Fork)
+
+- Modernized all iOS AVFoundation APIs to use async `load(_:)` methods, eliminating 15 iOS 16+ deprecation warnings.
+- Backward compatible with iOS <16 via `#available` checks.
+- Fork maintained by DayLight Creative Technologies (Steven Day).
+
 ## 3.1.4
 
 - Removes references to v1 Flutter Android embedding classes.

@@ -1,5 +1,17 @@
 # video_compress
 
+## DLCT Fork
+
+This is a fork maintained by **DayLight Creative Technologies** (Steven Day).
+
+**Changes from upstream:**
+- Modernized all iOS AVFoundation APIs to use async `load(_:)` methods, eliminating 15 iOS 16+ deprecation warnings
+- Backward compatible with iOS <16 via `#available` checks
+
+**Upstream repository:** [jonataslaw/VideoCompress](https://github.com/jonataslaw/VideoCompress)
+
+---
+
 Compress videos, remove audio, manipulate thumbnails, and make your video compatible with all platforms through this lightweight and efficient library.
 100% native code was used, we do not use FFMPEG as it is very slow, bloated and the GNU license is an obstacle for commercial applications.
 In addition, google chrome uses VP8/VP9, safari uses h264, and most of the time, it is necessary to encode the video in two formats, but not with this library.
