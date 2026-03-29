@@ -1,4 +1,4 @@
-## 3.1.4+2 (DLCT Fork)
+## 3.1.5 (DLCT Fork)
 
 - Fix null check operator crash in `MediaInfo.fromJson` when native layer returns null path (Sentry 96T).
 - Guard `path` null check in both `fromJson` and `toJson` — `file` field is now null when `path` is null.
