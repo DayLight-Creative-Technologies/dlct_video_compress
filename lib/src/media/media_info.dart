@@ -40,7 +40,7 @@ class MediaInfo {
     filesize = json['filesize'];
     duration = double.tryParse('${json['duration']}');
     isCancel = json['isCancel'];
-    file = File(path!);
+    file = path != null ? File(path!) : null;
   }
 
   Map<String, dynamic> toJson() {
@@ -58,7 +58,7 @@ class MediaInfo {
     if (isCancel != null) {
       data['isCancel'] = isCancel;
     }
-    data['file'] = File(path!).toString();
+    data['file'] = path != null ? File(path!).toString() : null;
     return data;
   }
 }

@@ -1,3 +1,8 @@
+## 3.1.4+2 (DLCT Fork)
+
+- Fix null check operator crash in `MediaInfo.fromJson` when native layer returns null path (Sentry 96T).
+- Guard `path` null check in both `fromJson` and `toJson` — `file` field is now null when `path` is null.
+
 ## 3.1.4+1 (DLCT Fork)
 
 - Modernized all iOS AVFoundation APIs to use async `load(_:)` methods, eliminating 15 iOS 16+ deprecation warnings.
