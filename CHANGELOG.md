@@ -1,3 +1,14 @@
+## 3.1.5+dlct.1 (DLCT Fork)
+
+- Migrated to Flutter's built-in Kotlin support per the official plugin-author
+  guide (https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors):
+  removed the `kotlin-android` plugin application and the `kotlinOptions`
+  block, and added a top-level `kotlin { compilerOptions { jvmTarget } }`
+  block. Flutter warns that a future release will refuse to build apps whose
+  plugins apply the Kotlin Gradle Plugin directly; this closes that warning
+  for consuming apps on AGP 9 with `android.builtInKotlin=false`. Forward
+  migration, not a workaround — no retire condition.
+
 ## 3.1.5 (DLCT Fork)
 
 - Fix null check operator crash in `MediaInfo.fromJson` when native layer returns null path (Sentry 96T).
