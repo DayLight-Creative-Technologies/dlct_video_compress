@@ -63,6 +63,26 @@ class MediaInfoJsonTest {
         assertEquals(4096L, json.get("filesize"))
     }
 
+    /**
+     * The retriever reports the stored (coded) size and the rotation a player
+     * applies; the JSON's width and height are the displayed size. A quarter
+     * turn swaps them, a half turn does not (gap #906: the swap was applied
+     * for 0 and 180 instead).
+     */
+    @Test
+    fun widthAndHeightAreTheDisplayedSizeForEveryRotation() {
+        val expected = mapOf(0 to (1920L to 1080L), 90 to (1080L to 1920L),
+            180 to (1920L to 1080L), 270 to (1080L to 1920L))
+        for ((rotation, size) in expected) {
+            val json = utility.mediaInfoJson("/v.mp4", 10L,
+                raw(width = "1920", height = "1080", rotation = rotation.toString()))
+
+            assertEquals("width at $rotation", size.first, json.get("width"))
+            assertEquals("height at $rotation", size.second, json.get("height"))
+            assertEquals("orientation at $rotation", rotation, json.get("orientation"))
+        }
+    }
+
     @Test
     fun noMetadataLeavesEveryNumberAbsent() {
         val json = utility.mediaInfoJson("/v.mp4", 10L, raw())

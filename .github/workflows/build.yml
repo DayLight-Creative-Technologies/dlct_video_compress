@@ -95,15 +95,30 @@ jobs:
           done
 
   # [DLCT] The macOS plugin's real sources (macos/Classes), compiled against a
-  # FlutterMacOS stand-in, answer getMediaInfo on fixture files
-  # (macos/Tests/media_info). The script exits non-zero on any failed check.
+  # FlutterMacOS stand-in, answer getMediaInfo, getByteThumbnail and
+  # getFileThumbnail on fixture files (native_tests/media_info), on both of
+  # its loading paths. The script exits non-zero on any failed check, and
+  # when no check ran.
   native-test-macos:
     name: "Native unit tests (macOS)"
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run getMediaInfo checks
-        run: macos/Tests/media_info/run.sh
+      - name: Run the plugin's macOS logic
+        run: native_tests/media_info/run_macos.sh
+
+  # [DLCT] The same checks on the iOS plugin's real Swift sources
+  # (ios/Classes), compiled against a Flutter stand-in and run inside
+  # simulators of the newest and the oldest iOS runtime the runner has. The
+  # script exits non-zero on any failed check, when a run reports no passed
+  # checks, and when no runtime is installed.
+  native-test-ios:
+    name: "Native unit tests (iOS)"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the plugin's iOS logic on simulators
+        run: native_tests/media_info/run_ios.sh
 
   build-android:
     name: "Build Android (${{ matrix.sdk }})"

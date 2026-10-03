@@ -1,3 +1,50 @@
+## 3.1.5+dlct.6 (DLCT Fork)
+
+`getMediaInfo` reports a video's displayed size and its rotation the same
+way on Android, iOS and macOS (SSK gaps #906, #907), and the iOS plugin's
+logic runs in CI (SSK gap #908).
+
+- Android: `Utility.mediaInfoJson` swapped the retriever's width and height
+  for rotations 0 and 180 instead of 90 and 270, so every video's size was
+  reported transposed. The retriever reports the stored size; the JSON's
+  `width` and `height` are now the displayed size (swapped for a quarter
+  turn only). `isLandscapeImage`, its only use, is gone. `orientation` is
+  unchanged.
+- iOS/macOS: `AvController.getVideoOrientation` read the angle from the
+  preferred transform's translation, so an untransformed track reported 90,
+  a portrait iPhone video 270, a half turn 0 and a three-quarter turn 180.
+  It now takes the transform's rotation (`atan2(b, a)`, to the nearest
+  quarter turn): 0, 90, 180 or 270 clockwise, the angle Android reports for
+  the same file. `width` and `height` are the natural size swapped for a
+  quarter turn (`AvController.getDisplayedSize`), as on Android; for the
+  rotations a camera writes this is the size reported before.
+- macOS: tracks, common metadata and its string values, a track's frame
+  rate, natural size and preferred transform, and the asset's duration are
+  read with AVFoundation's async `load` API on macOS 13+, where the
+  synchronous API is deprecated, and with the synchronous API on 10.15-12,
+  as iOS already does on iOS 16+ and earlier. A size or transform that cannot
+  be loaded leaves width, height and orientation absent, as on iOS.
+- iOS/macOS: `AvController.usesAsyncLoading` (default true) selects the
+  async path where the OS has it; only the native tests set it false, to run
+  the older path on a newer OS too.
+- Dart: `MediaInfo.width`, `height` and `orientation` document these
+  meanings. No code change.
+- Tests: `MediaInfoJsonTest` checks the exact width, height and orientation
+  for rotations 0, 90, 180 and 270. The macOS harness moved to
+  `native_tests/media_info/` and is shared with iOS: `main.swift` runs the
+  real `getMediaInfo`, `getByteThumbnail` and `getFileThumbnail` channel calls
+  on the fixtures, on both loading paths, and checks the exact orientation,
+  width and height of an untransformed video and of three rotated ones
+  (`video_rot90|180|270.mp4`, written by `make_rotated_fixtures.swift` with
+  the transforms a camera writes), and that each thumbnail is a JPEG of the
+  displayed size, at the first frame and at the end of the clip. It fails if
+  no check ran. `run_macos.sh` builds `macos/Classes` at macOS 10.15;
+  `run_ios.sh` builds the Swift sources in `ios/Classes` for the simulator at
+  iOS 13.0 against a Flutter stand-in and runs them in a fresh simulator of
+  the newest and of the oldest iOS runtime installed.
+- CI: new job `Native unit tests (iOS)` runs `run_ios.sh` on macos-latest;
+  `Native unit tests (macOS)` runs `run_macos.sh`.
+
 ## 3.1.5+dlct.5 (DLCT Fork)
 
 `getMediaInfo` reports only what a file has, and answers every call exactly

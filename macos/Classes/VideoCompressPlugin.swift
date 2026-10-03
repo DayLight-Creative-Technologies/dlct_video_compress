@@ -2,13 +2,83 @@ import FlutterMacOS
 import AVFoundation
 import Cocoa
 
-/// The asset's duration; nil when it is not a number (indefinite or
-/// invalid). An invalid duration's NaN used to crash the JSON encoding of the
-/// media info.
-private func loadAssetDuration(_ asset: AVAsset) -> CMTime? {
-    let duration = asset.duration
-    return duration.isNumeric ? duration : nil
+// MARK: - Track Property Loading Helpers
+//
+// Each reads through AVFoundation's async `load` API on macOS 13+, where the
+// synchronous properties are deprecated, and through those properties on
+// macOS 10.15-12, as the iOS plugin does on iOS 16+ and earlier.
+
+private func loadTrackFrameRate(_ track: AVAssetTrack) -> Float {
+    if #available(macOS 13.0, *), AvController.usesAsyncLoading {
+        var result: Float = 30.0
+        let group = DispatchGroup()
+        group.enter()
+        Task {
+            result = (try? await track.load(.nominalFrameRate)) ?? 30.0
+            group.leave()
+        }
+        group.wait()
+        return result
+    } else {
+        return track.nominalFrameRate
+    }
 }
+
+/// The track's natural size; nil when it cannot be loaded.
+private func loadTrackNaturalSize(_ track: AVAssetTrack) -> CGSize? {
+    if #available(macOS 13.0, *), AvController.usesAsyncLoading {
+        var result: CGSize? = nil
+        let group = DispatchGroup()
+        group.enter()
+        Task {
+            result = try? await track.load(.naturalSize)
+            group.leave()
+        }
+        group.wait()
+        return result
+    } else {
+        return track.naturalSize
+    }
+}
+
+/// The track's preferred transform; nil when it cannot be loaded.
+private func loadTrackPreferredTransform(_ track: AVAssetTrack) -> CGAffineTransform? {
+    if #available(macOS 13.0, *), AvController.usesAsyncLoading {
+        var result: CGAffineTransform? = nil
+        let group = DispatchGroup()
+        group.enter()
+        Task {
+            result = try? await track.load(.preferredTransform)
+            group.leave()
+        }
+        group.wait()
+        return result
+    } else {
+        return track.preferredTransform
+    }
+}
+
+/// The asset's duration; nil when it cannot be loaded or is not a number
+/// (indefinite or invalid). An invalid duration's NaN used to crash the JSON
+/// encoding of the media info.
+private func loadAssetDuration(_ asset: AVAsset) -> CMTime? {
+    var result: CMTime? = nil
+    if #available(macOS 13.0, *), AvController.usesAsyncLoading {
+        let group = DispatchGroup()
+        group.enter()
+        Task {
+            result = try? await asset.load(.duration)
+            group.leave()
+        }
+        group.wait()
+    } else {
+        result = asset.duration
+    }
+    guard let duration = result, duration.isNumeric else { return nil }
+    return duration
+}
+
+// MARK: - Plugin
 
 public class VideoCompressPlugin: NSObject, FlutterPlugin {
     private let channelName = "video_compress"
@@ -78,7 +148,7 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         let assetImgGenerate = AVAssetImageGenerator(asset: asset)
         assetImgGenerate.appliesPreferredTrackTransform = true
 
-        let timeScale = CMTimeScale(track.nominalFrameRate)
+        let timeScale = CMTimeScale(loadTrackFrameRate(track))
         let positionSeconds = max(0, Float64(truncating: position) / 1000)
         let requested = CMTimeMakeWithSeconds(positionSeconds, preferredTimescale: timeScale)
         // Clamped to the video's length when it is known.
@@ -123,7 +193,9 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
     /// duration) leaves its fields absent, never 0. (A file without a video
     /// track, or one that could not be read, used to answer `{}`, without
     /// even its path.) The filesize is the file's size in bytes, as on
-    /// Android; it used to be the video track's sample bytes only.
+    /// Android; it used to be the video track's sample bytes only. The width
+    /// and height are the displayed size, and the orientation the clockwise
+    /// turn that displays it, as on Android.
     public func getMediaInfoJson(_ path: String)->[String : Any]? {
         let url = Utility.getPathUrl(path)
         let asset = avController.getVideoAsset(url)
@@ -140,13 +212,14 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         if let filesize = Utility.fileSize(url) {
             json["filesize"] = filesize
         }
-        if let track = videoTracks.first {
-            let naturalSize = track.naturalSize
-            let transform = track.preferredTransform
-            let size = naturalSize.applying(transform)
-            json["width"] = abs(size.width)
-            json["height"] = abs(size.height)
-            json["orientation"] = avController.getVideoOrientation(naturalSize, transform)
+        if let track = videoTracks.first,
+           let naturalSize = loadTrackNaturalSize(track),
+           let transform = loadTrackPreferredTransform(track) {
+            let orientation = avController.getVideoOrientation(transform)
+            let size = avController.getDisplayedSize(naturalSize, orientation)
+            json["width"] = size.width
+            json["height"] = size.height
+            json["orientation"] = orientation
         }
         return json
     }

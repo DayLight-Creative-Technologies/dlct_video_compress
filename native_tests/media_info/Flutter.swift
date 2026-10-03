@@ -1,7 +1,8 @@
-// [DLCT] A minimal stand-in for the FlutterMacOS API the plugin uses, so the
-// plugin's real sources in macos/Classes compile and run as a command-line
-// program (see run.sh). Like the real module, it re-exports Cocoa.
-@_exported import Cocoa
+// [DLCT] A minimal stand-in for the Flutter (iOS) API the plugin uses, so the
+// plugin's real Swift sources in ios/Classes compile and run as a
+// command-line program on a simulator (see run_ios.sh). Like the real
+// module, it re-exports UIKit.
+@_exported import UIKit
 
 public typealias FlutterResult = (Any?) -> Void
 public let FlutterMethodNotImplemented: NSObject = NSObject()
@@ -36,7 +37,7 @@ public class FlutterMethodChannel: NSObject {
 }
 
 public protocol FlutterPluginRegistrar {
-    var messenger: FlutterBinaryMessenger { get }
+    func messenger() -> FlutterBinaryMessenger
     func addMethodCallDelegate(_ delegate: FlutterPlugin, channel: FlutterMethodChannel)
 }
 

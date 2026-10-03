@@ -22,8 +22,6 @@ internal data class RawMediaMetadata(
 
 class Utility(private val channelName: String) {
 
-    fun isLandscapeImage(orientation: Int) = orientation != 90 && orientation != 270
-
     fun deleteFile(file: File) {
         if (file.exists()) {
             file.delete()
@@ -80,13 +78,15 @@ class Utility(private val channelName: String) {
      * The media info JSON of the file at [path], [filesize] bytes long, from
      * the strings its retriever reported. A number the file does not report,
      * or reports unparseably, is absent from the JSON; a missing title or
-     * author is "". Pure.
+     * author is "". The width and height are the displayed size: the
+     * retriever reports the stored size, so a quarter turn (90 or 270) swaps
+     * them. (They were swapped for 0 and 180 instead, SSK gap #906.) Pure.
      */
     internal fun mediaInfoJson(path: String, filesize: Long, metadata: RawMediaMetadata): JSONObject {
         var width = metadata.width?.toLongOrNull()
         var height = metadata.height?.toLongOrNull()
         val ori = metadata.rotation?.toIntOrNull()
-        if (ori != null && isLandscapeImage(ori)) {
+        if (ori == 90 || ori == 270) {
             val tmp = width
             width = height
             height = tmp

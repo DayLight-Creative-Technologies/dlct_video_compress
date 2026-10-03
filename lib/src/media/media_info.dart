@@ -4,10 +4,16 @@ class MediaInfo {
   String? path;
   String? title;
   String? author;
+  /// The displayed width in pixels: the stored frame's height when
+  /// [orientation] is a quarter turn (90 or 270).
   int? width;
+
+  /// The displayed height in pixels: the stored frame's width when
+  /// [orientation] is a quarter turn (90 or 270).
   int? height;
 
-  /// [Android] API level 17
+  /// The clockwise turn, in degrees (0, 90, 180 or 270), that displays the
+  /// stored frames, the same on every platform. [Android] API level 17
   int? orientation;
 
   /// bytes

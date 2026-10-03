@@ -4,7 +4,7 @@ import AVFoundation
 // MARK: - Track Property Loading Helpers
 
 private func loadTrackFrameRate(_ track: AVAssetTrack) -> Float {
-    if #available(iOS 16.0, *) {
+    if #available(iOS 16.0, *), AvController.usesAsyncLoading {
         var result: Float = 30.0
         let group = DispatchGroup()
         group.enter()
@@ -22,7 +22,7 @@ private func loadTrackFrameRate(_ track: AVAssetTrack) -> Float {
 /// The track's natural size; nil when it cannot be loaded (it used to be
 /// .zero, reported as a 0 x 0 video).
 private func loadTrackNaturalSize(_ track: AVAssetTrack) -> CGSize? {
-    if #available(iOS 16.0, *) {
+    if #available(iOS 16.0, *), AvController.usesAsyncLoading {
         var result: CGSize? = nil
         let group = DispatchGroup()
         group.enter()
@@ -39,7 +39,7 @@ private func loadTrackNaturalSize(_ track: AVAssetTrack) -> CGSize? {
 
 /// The track's preferred transform; nil when it cannot be loaded.
 private func loadTrackPreferredTransform(_ track: AVAssetTrack) -> CGAffineTransform? {
-    if #available(iOS 16.0, *) {
+    if #available(iOS 16.0, *), AvController.usesAsyncLoading {
         var result: CGAffineTransform? = nil
         let group = DispatchGroup()
         group.enter()
@@ -60,7 +60,7 @@ private func loadTrackPreferredTransform(_ track: AVAssetTrack) -> CGAffineTrans
 /// encoding of the media info.
 private func loadAssetDuration(_ asset: AVAsset) -> CMTime? {
     var result: CMTime? = nil
-    if #available(iOS 16.0, *) {
+    if #available(iOS 16.0, *), AvController.usesAsyncLoading {
         let group = DispatchGroup()
         group.enter()
         Task {
@@ -189,7 +189,9 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
     /// track, or one that could not be read, used to answer `{}`, without
     /// even its path; a size, transform or duration that could not be loaded
     /// was reported as 0.) The filesize is the file's size in bytes, as on
-    /// Android; it used to be the video track's sample bytes only.
+    /// Android; it used to be the video track's sample bytes only. The width
+    /// and height are the displayed size, and the orientation the clockwise
+    /// turn that displays it, as on Android.
     public func getMediaInfoJson(_ path: String)->[String : Any]? {
         let url = Utility.getPathUrl(path)
         let asset = avController.getVideoAsset(url)
@@ -209,10 +211,11 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         if let track = videoTracks.first,
            let naturalSize = loadTrackNaturalSize(track),
            let transform = loadTrackPreferredTransform(track) {
-            let size = naturalSize.applying(transform)
-            json["width"] = abs(size.width)
-            json["height"] = abs(size.height)
-            json["orientation"] = avController.getVideoOrientation(naturalSize, transform)
+            let orientation = avController.getVideoOrientation(transform)
+            let size = avController.getDisplayedSize(naturalSize, orientation)
+            json["width"] = size.width
+            json["height"] = size.height
+            json["orientation"] = orientation
         }
         return json
     }
