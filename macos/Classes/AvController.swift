@@ -7,30 +7,32 @@ class AvController: NSObject {
         return AVURLAsset(url: url)
     }
     
-    public func getTrack(_ asset: AVURLAsset)->AVAssetTrack? {
-        var track : AVAssetTrack? = nil
+    /// The asset's video tracks, empty when it has none (an audio file); nil
+    /// when the file cannot be read as media at all (it does not exist, or is
+    /// not a format AVFoundation opens: loading its tracks fails).
+    public func loadVideoTracks(_ asset: AVURLAsset)->[AVAssetTrack]? {
+        var tracks : [AVAssetTrack]? = nil
         let group = DispatchGroup()
         group.enter()
         asset.loadValuesAsynchronously(forKeys: ["tracks"], completionHandler: {
             var error: NSError? = nil;
             let status = asset.statusOfValue(forKey: "tracks", error: &error)
             if (status == .loaded) {
-                track = asset.tracks(withMediaType: AVMediaType.video).first
+                tracks = asset.tracks(withMediaType: AVMediaType.video)
             }
             group.leave()
         })
         group.wait()
-        return track
+        return tracks
     }
-    
-    public func getVideoOrientation(_ path:String)-> Int? {
-        let url = Utility.getPathUrl(path)
-        let asset = getVideoAsset(url)
-        guard let track = getTrack(asset) else {
-            return nil
-        }
-        let size = track.naturalSize
-        let txf = track.preferredTransform
+
+    public func getTrack(_ asset: AVURLAsset)->AVAssetTrack? {
+        return loadVideoTracks(asset)?.first
+    }
+
+    /// The rotation of a video track with [size] and transform [txf]. (This
+    /// used to reload the track from its path.)
+    public func getVideoOrientation(_ size: CGSize,_ txf: CGAffineTransform)-> Int {
         if size.width == txf.tx && size.height == txf.ty {
             return 0
         } else if txf.tx == 0 && txf.ty == 0 {

@@ -34,7 +34,13 @@ class Utility: NSObject {
         return path.replacingOccurrences(of: "file://", with: "")
     }
     
-    static func keyValueToJson(_ keyAndValue: [String : Any?])->String {
+    /// The size in bytes of the file at [url]; nil when it cannot be read.
+    static func fileSize(_ url: URL)->Int64? {
+        let attributes = try? fileManager.attributesOfItem(atPath: url.path)
+        return (attributes?[.size] as? NSNumber)?.int64Value
+    }
+
+    static func keyValueToJson(_ keyAndValue: [String : Any])->String {
         let data = try! JSONSerialization.data(withJSONObject: keyAndValue as NSDictionary, options: [])
         let jsonString = NSString(data:data as Data,encoding: String.Encoding.utf8.rawValue)
         return jsonString! as String

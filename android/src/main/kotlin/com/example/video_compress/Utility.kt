@@ -4,10 +4,21 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.os.Build
-import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
 import java.io.File
+
+/**
+ * The metadata strings a [MediaMetadataRetriever] reported for a file, each
+ * null where the file has none.
+ */
+internal data class RawMediaMetadata(
+    val duration: String?,
+    val title: String?,
+    val author: String?,
+    val width: String?,
+    val height: String?,
+    val rotation: String?,
+)
 
 class Utility(private val channelName: String) {
 
@@ -31,49 +42,86 @@ class Utility(private val channelName: String) {
         return timeStamp.toLong()
     }
 
-    fun getMediaInfoJson(context: Context, path: String): JSONObject {
+    /**
+     * The media info of the file at [path]. Metadata the file does not have
+     * (a duration, a width, a height, a rotation) is absent from the JSON,
+     * never 0. Throws when the file cannot be read as media at all
+     * (setDataSource's IllegalArgumentException or RuntimeException). The
+     * retriever is released either way; it used to leak when a missing
+     * duration, width or height threw from parseLong.
+     */
+    fun getMediaInfoJson(context: Context, path: String): JSONObject =
+        readMediaInfoJson(MediaMetadataRetriever(), context, path)
+
+    /** [getMediaInfoJson] reading through [retriever], which it releases. */
+    internal fun readMediaInfoJson(
+        retriever: MediaMetadataRetriever,
+        context: Context,
+        path: String,
+    ): JSONObject {
         val file = File(path)
-        val retriever = MediaMetadataRetriever()
-
-        retriever.setDataSource(context, Uri.fromFile(file))
-
-        val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-        val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) ?: ""
-        val author = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_AUTHOR) ?: ""
-        val widthStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
-        val heightStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-        val duration = java.lang.Long.parseLong(durationStr)
-        var width = java.lang.Long.parseLong(widthStr)
-        var height = java.lang.Long.parseLong(heightStr)
-        val filesize = file.length()
-        val orientation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
-        } else {
-            null
+        try {
+            retriever.setDataSource(context, Uri.fromFile(file))
+            val metadata = RawMediaMetadata(
+                duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION),
+                title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE),
+                author = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_AUTHOR),
+                width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH),
+                height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT),
+                rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION),
+            )
+            return mediaInfoJson(path, file.length(), metadata)
+        } finally {
+            releaseQuietly(retriever)
         }
-        val ori = orientation?.toIntOrNull()
+    }
+
+    /**
+     * The media info JSON of the file at [path], [filesize] bytes long, from
+     * the strings its retriever reported. A number the file does not report,
+     * or reports unparseably, is absent from the JSON; a missing title or
+     * author is "". Pure.
+     */
+    internal fun mediaInfoJson(path: String, filesize: Long, metadata: RawMediaMetadata): JSONObject {
+        var width = metadata.width?.toLongOrNull()
+        var height = metadata.height?.toLongOrNull()
+        val ori = metadata.rotation?.toIntOrNull()
         if (ori != null && isLandscapeImage(ori)) {
             val tmp = width
             width = height
             height = tmp
         }
 
-        retriever.release()
-
         val json = JSONObject()
 
         json.put("path", path)
-        json.put("title", title)
-        json.put("author", author)
-        json.put("width", width)
-        json.put("height", height)
-        json.put("duration", duration)
+        json.put("title", metadata.title ?: "")
+        json.put("author", metadata.author ?: "")
+        if (width != null) {
+            json.put("width", width)
+        }
+        if (height != null) {
+            json.put("height", height)
+        }
+        val duration = metadata.duration?.toLongOrNull()
+        if (duration != null) {
+            json.put("duration", duration)
+        }
         json.put("filesize", filesize)
         if (ori != null) {
             json.put("orientation", ori)
         }
 
         return json
+    }
+
+    /** Releases [retriever]; a failure while cleaning up changes no answer. */
+    private fun releaseQuietly(retriever: MediaMetadataRetriever) {
+        try {
+            retriever.release()
+        } catch (ex: Exception) {
+            // Nothing to do: the read already succeeded or already failed.
+        }
     }
 
     /**
@@ -94,11 +142,7 @@ class Utility(private val channelName: String) {
             // IllegalArgumentException included: a corrupt or unreadable video.
             null
         } finally {
-            try {
-                retriever.release()
-            } catch (ex: Exception) {
-                // A failure while cleaning up does not change the frame read.
-            }
+            releaseQuietly(retriever)
         }
 
         val frame = bitmap ?: return null
@@ -132,8 +176,10 @@ class Utility(private val channelName: String) {
         return fileName
     }
 
-    fun deleteAllCache(context: Context, result: MethodChannel.Result) {
-        val dir = context.getExternalFilesDir("video_compress")
-        result.success(dir?.deleteRecursively())
-    }
+    /**
+     * Deletes the compressed-video cache: true when it was deleted, false
+     * when not all of it could be, null when there is no external storage.
+     */
+    fun deleteAllCache(context: Context): Boolean? =
+        context.getExternalFilesDir("video_compress")?.deleteRecursively()
 }

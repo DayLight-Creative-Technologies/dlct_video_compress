@@ -96,17 +96,24 @@ extension Compress on IVideoCompress {
   ///
   /// get media information from [path] return [Future<MediaInfo>]
   ///
+  /// Metadata the file does not have (a duration, a width, a height) is null,
+  /// never 0. Throws a [StateError] when the file cannot be read as media.
+  ///
   /// ## example
   /// ```dart
   /// final info = await _flutterVideoCompress.getMediaInfo(file.path);
   /// debugPrint(info.toJson());
   /// ```
   Future<MediaInfo> getMediaInfo(String path) async {
-    // Not to set the result as strong-mode so that it would have exception to
-    // lead to the failure of compression
     final jsonStr = await (_invoke<String>('getMediaInfo', {'path': path}));
-    final jsonMap = json.decode(jsonStr!);
-    return MediaInfo.fromJson(jsonMap);
+
+    // The platform answers an error when it cannot read the file (this used
+    // to throw a null-check TypeError here).
+    if (jsonStr == null) {
+      throw StateError('VideoCompress: getMediaInfo could not read $path');
+    }
+
+    return MediaInfo.fromJson(json.decode(jsonStr));
   }
 
   /// compress video from [path]

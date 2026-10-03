@@ -85,12 +85,25 @@ jobs:
       - name: Run Kotlin JVM unit tests
         working-directory: example/android
         run: ./gradlew :video_compress:testDebugUnitTest
-      - name: Fail if no Kotlin test ran
+      - name: Fail if a Kotlin test class did not run
         run: |
-          result=example/build/video_compress/test-results/testDebugUnitTest/TEST-com.example.video_compress.PendingCompressTest.xml
-          test -f "$result"
-          grep -q 'tests="[1-9][0-9]*"' "$result"
-          grep -h -o 'tests="[0-9]*"' "$result"
+          for suite in PendingCompressTest MediaInfoTest MediaInfoJsonTest; do
+            result="example/build/video_compress/test-results/testDebugUnitTest/TEST-com.example.video_compress.$suite.xml"
+            test -f "$result"
+            grep -q 'tests="[1-9][0-9]*"' "$result"
+            echo "$suite: $(grep -h -o 'tests="[0-9]*"' "$result")"
+          done
+
+  # [DLCT] The macOS plugin's real sources (macos/Classes), compiled against a
+  # FlutterMacOS stand-in, answer getMediaInfo on fixture files
+  # (macos/Tests/media_info). The script exits non-zero on any failed check.
+  native-test-macos:
+    name: "Native unit tests (macOS)"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run getMediaInfo checks
+        run: macos/Tests/media_info/run.sh
 
   build-android:
     name: "Build Android (${{ matrix.sdk }})"

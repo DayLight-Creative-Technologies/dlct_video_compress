@@ -2,6 +2,14 @@ import FlutterMacOS
 import AVFoundation
 import Cocoa
 
+/// The asset's duration; nil when it is not a number (indefinite or
+/// invalid). An invalid duration's NaN used to crash the JSON encoding of the
+/// media info.
+private func loadAssetDuration(_ asset: AVAsset) -> CMTime? {
+    let duration = asset.duration
+    return duration.isNumeric ? duration : nil
+}
+
 public class VideoCompressPlugin: NSObject, FlutterPlugin {
     private let channelName = "video_compress"
     /// The export running now, if any: what `cancelCompression` stops.
@@ -73,7 +81,8 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         let timeScale = CMTimeScale(track.nominalFrameRate)
         let positionSeconds = max(0, Float64(truncating: position) / 1000)
         let requested = CMTimeMakeWithSeconds(positionSeconds, preferredTimescale: timeScale)
-        let time = CMTimeMinimum(requested, asset.duration)
+        // Clamped to the video's length when it is known.
+        let time = loadAssetDuration(asset).map { CMTimeMinimum(requested, $0) } ?? requested
         guard let img = try? assetImgGenerate.copyCGImage(at:time, actualTime: nil) else {
             return nil
         }
@@ -109,44 +118,47 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         result(Utility.excludeFileProtocol(url.absoluteString))
     }
 
-    public func getMediaInfoJson(_ path: String)->[String : Any?] {
+    /// The media info of the file at [path]; nil when it cannot be read as
+    /// media at all. Anything the file does not have (a video track, a
+    /// duration) leaves its fields absent, never 0. (A file without a video
+    /// track, or one that could not be read, used to answer `{}`, without
+    /// even its path.) The filesize is the file's size in bytes, as on
+    /// Android; it used to be the video track's sample bytes only.
+    public func getMediaInfoJson(_ path: String)->[String : Any]? {
         let url = Utility.getPathUrl(path)
         let asset = avController.getVideoAsset(url)
-        guard let track = avController.getTrack(asset) else { return [:] }
-        
-        let playerItem = AVPlayerItem(url: url)
-        let metadataAsset = playerItem.asset
-        
-        let orientation = avController.getVideoOrientation(path)
-        
-        let title = avController.getMetaDataByTag(metadataAsset,key: "title")
-        let author = avController.getMetaDataByTag(metadataAsset,key: "author")
-        
-        let duration = asset.duration.seconds * 1000
-        let filesize = track.totalSampleDataLength
-        
-        let size = track.naturalSize.applying(track.preferredTransform)
-        
-        let width = abs(size.width)
-        let height = abs(size.height)
-        
-        let dictionary = [
-            "path":Utility.excludeFileProtocol(path),
-            "title":title,
-            "author":author,
-            "width":width,
-            "height":height,
-            "duration":duration,
-            "filesize":filesize,
-            "orientation":orientation
-            ] as [String : Any?]
-        return dictionary
+        guard let videoTracks = avController.loadVideoTracks(asset) else { return nil }
+
+        var json: [String : Any] = [
+            "path": Utility.excludeFileProtocol(path),
+            "title": avController.getMetaDataByTag(asset, key: "title"),
+            "author": avController.getMetaDataByTag(asset, key: "author"),
+        ]
+        if let duration = loadAssetDuration(asset) {
+            json["duration"] = duration.seconds * 1000
+        }
+        if let filesize = Utility.fileSize(url) {
+            json["filesize"] = filesize
+        }
+        if let track = videoTracks.first {
+            let naturalSize = track.naturalSize
+            let transform = track.preferredTransform
+            let size = naturalSize.applying(transform)
+            json["width"] = abs(size.width)
+            json["height"] = abs(size.height)
+            json["orientation"] = avController.getVideoOrientation(naturalSize, transform)
+        }
+        return json
     }
-    
+
+    /// Answered exactly once: the info, or an error when the file cannot be
+    /// read as media at all.
     private func getMediaInfo(_ path: String,_ result: FlutterResult) {
-        let json = getMediaInfoJson(path)
-        let string = Utility.keyValueToJson(json)
-        result(string)
+        guard let json = getMediaInfoJson(path) else {
+            return result(FlutterError(code: channelName, message: "getMediaInfo error",
+                                       details: "Cannot read \(path)"))
+        }
+        result(Utility.keyValueToJson(json))
     }
     
     
@@ -206,10 +218,16 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         let compressionUrl =
             Utility.getPathUrl("\(Utility.basePath())/\(Utility.getFileName(path))\(NSUUID().uuidString).\(sourceVideoType)")
         
-        let timescale = sourceVideoAsset.duration.timescale
+        // Without a length there is no time range to export (an invalid
+        // duration used to make a NaN time range).
+        guard let assetDuration = loadAssetDuration(sourceVideoAsset) else {
+            return result(FlutterError(code: channelName, message: "compressVideo error",
+                                       details: "Cannot read the duration of \(path)"))
+        }
+        let timescale = assetDuration.timescale
         let minStartTime = Double(startTime ?? 0)
-        
-        let videoDuration = sourceVideoAsset.duration.seconds
+
+        let videoDuration = assetDuration.seconds
         let minDuration = Double(duration ?? videoDuration)
         let maxDurationTime = minStartTime + minDuration < videoDuration ? minDuration : videoDuration
         
@@ -258,6 +276,16 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
                 }
                 switch exporter.status {
                 case .completed:
+                    // An output that cannot be read is a failed compress, as
+                    // on Android, and the original is kept: it is deleted
+                    // only once the output is known to be readable (it used
+                    // to be deleted first).
+                    guard var json = self.getMediaInfoJson(compressionUrl.path) else {
+                        try? FileManager.default.removeItem(at: compressionUrl)
+                        result(FlutterError(code: self.channelName, message: "compressVideo error",
+                                            details: "Cannot read the compressed video"))
+                        return
+                    }
                     if deleteOrigin {
                         let fileManager = FileManager.default
                         do {
@@ -269,7 +297,6 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
                             print(error)
                         }
                     }
-                    var json = self.getMediaInfoJson(compressionUrl.path)
                     json["isCancel"] = false
                     result(Utility.keyValueToJson(json))
                 case .cancelled:

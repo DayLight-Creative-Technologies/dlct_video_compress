@@ -71,6 +71,47 @@ void main() {
     });
   });
 
+  group('getMediaInfo', () {
+    test('metadata the file lacks decodes as null, never 0', () async {
+      answer((call) async =>
+          '{"path":"/tmp/in.mp4","title":"","author":"","filesize":1234}');
+
+      final info = await VideoCompress.getMediaInfo('/tmp/in.mp4');
+
+      expect(info.path, '/tmp/in.mp4');
+      expect(info.filesize, 1234);
+      expect(info.duration, isNull);
+      expect(info.width, isNull);
+      expect(info.height, isNull);
+      expect(info.orientation, isNull);
+    });
+
+    test('fromJson accepts a map with every field absent', () {
+      final info = MediaInfo.fromJson(<String, dynamic>{});
+
+      expect(info.path, isNull);
+      expect(info.title, isNull);
+      expect(info.author, isNull);
+      expect(info.width, isNull);
+      expect(info.height, isNull);
+      expect(info.orientation, isNull);
+      expect(info.filesize, isNull);
+      expect(info.duration, isNull);
+      expect(info.isCancel, isNull);
+      expect(info.file, isNull);
+    });
+
+    test('a file that cannot be read throws a StateError naming it', () async {
+      answer((call) async => throw PlatformException(
+          code: 'video_compress', message: 'getMediaInfo error'));
+
+      await expectLater(
+          VideoCompress.getMediaInfo('/tmp/in.mp4'),
+          throwsA(isA<StateError>().having((e) => e.message, 'message',
+              'VideoCompress: getMediaInfo could not read /tmp/in.mp4')));
+    });
+  });
+
   group('thumbnails', () {
     test('getByteThumbnail answers null when the frame cannot be read',
         () async {

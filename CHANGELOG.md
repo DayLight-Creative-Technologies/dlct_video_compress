@@ -1,3 +1,49 @@
+## 3.1.5+dlct.5 (DLCT Fork)
+
+`getMediaInfo` reports only what a file has, and answers every call exactly
+once (SSK gap #905).
+
+- Android: `getMediaInfoJson` passed the retriever's duration, width and
+  height straight to `Long.parseLong`, so a file without any of them threw
+  `NumberFormatException` (and three "Java type mismatch" warnings) and leaked
+  its `MediaMetadataRetriever`. Now each is absent from the JSON when the file
+  does not report it (or reports it unparseably), never 0, and the retriever
+  is released in a `finally`. The JSON is built by the pure
+  `Utility.mediaInfoJson` from the retriever's strings; its output is otherwise
+  unchanged. The `getMediaInfo` channel call answers the info, or one error
+  (`getMediaInfo error`) when the file cannot be read as media; the read used
+  to throw out of the handler. `deleteAllCache` answered every call twice
+  (`Utility.deleteAllCache` answered, then the handler answered again); it
+  answers once.
+- iOS/macOS: a file that could not be read and a file without a video track
+  both answered `{}`, with no path. Now an unreadable file answers one
+  `getMediaInfo error`, and a file without a video track (an audio file)
+  answers its path, title, author, duration and filesize, with no width,
+  height or orientation. A duration, size or transform that could not be loaded
+  is absent instead of 0 (iOS 16+ used to fall back to `.zero`), and an
+  indefinite duration is absent instead of a NaN that crashed the JSON
+  encoding. `filesize` is the file's size in bytes, as on Android; it was the
+  video track's sample bytes. A compress whose output cannot be read answers
+  `compressVideo error` and deletes the output, and `deleteOrigin` deletes the
+  original only after the output has been read (it deleted it first). A
+  compress whose source duration cannot be read answers `compressVideo error`
+  instead of exporting a 0 s range; a thumbnail is clamped to the video's
+  length only when the length is known.
+- Dart: `getMediaInfo` throws a `StateError` naming the path when the
+  platform cannot read the file; it threw a null-check `TypeError`.
+  `MediaInfo.fromJson` already decoded absent fields as null and is unchanged.
+- Tests: `android/src/test/.../MediaInfoTest.kt` (the public handler on a file
+  with no metadata, an unreadable call, `deleteAllCache`) and
+  `MediaInfoJsonTest.kt` (the JSON for full, partial, absent and unparseable
+  metadata; the retriever released after a read and after a failed open).
+  `test/video_compress_test.dart` covers absent fields and the unreadable
+  error. `macos/Tests/media_info/run.sh` compiles `macos/Classes` against a
+  FlutterMacOS stand-in and checks `getMediaInfo` on fixture files: missing,
+  not media, empty, audio only, video with and without metadata.
+- CI: `Native unit tests (Android)` fails unless `PendingCompressTest`,
+  `MediaInfoTest` and `MediaInfoJsonTest` each produced results with at least
+  one test. New job `Native unit tests (macOS)` runs the macOS checks.
+
 ## 3.1.5+dlct.4 (DLCT Fork)
 
 No change to the plugin's runtime behaviour.

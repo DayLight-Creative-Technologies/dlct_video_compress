@@ -7,18 +7,16 @@ class AvController: NSObject {
         return AVURLAsset(url: url)
     }
 
-    public func getTrack(_ asset: AVURLAsset)->AVAssetTrack? {
-        var track : AVAssetTrack? = nil
+    /// The asset's video tracks, empty when it has none (an audio file); nil
+    /// when the file cannot be read as media at all (it does not exist, or is
+    /// not a format AVFoundation opens: loading its tracks fails).
+    public func loadVideoTracks(_ asset: AVURLAsset)->[AVAssetTrack]? {
+        var tracks : [AVAssetTrack]? = nil
         let group = DispatchGroup()
         group.enter()
         if #available(iOS 16.0, *) {
             Task {
-                do {
-                    let tracks = try await asset.loadTracks(withMediaType: .video)
-                    track = tracks.first
-                } catch {
-                    // Failed to load tracks
-                }
+                tracks = try? await asset.loadTracks(withMediaType: .video)
                 group.leave()
             }
         } else {
@@ -26,44 +24,23 @@ class AvController: NSObject {
                 var error: NSError? = nil;
                 let status = asset.statusOfValue(forKey: "tracks", error: &error)
                 if (status == .loaded) {
-                    track = asset.tracks(withMediaType: AVMediaType.video).first
+                    tracks = asset.tracks(withMediaType: AVMediaType.video)
                 }
                 group.leave()
             })
         }
         group.wait()
-        return track
+        return tracks
     }
 
-    public func getVideoOrientation(_ path:String)-> Int? {
-        let url = Utility.getPathUrl(path)
-        let asset = getVideoAsset(url)
-        guard let track = getTrack(asset) else {
-            return nil
-        }
-        var size: CGSize
-        var txf: CGAffineTransform
-        if #available(iOS 16.0, *) {
-            let group = DispatchGroup()
-            group.enter()
-            var loadedSize: CGSize = .zero
-            var loadedTransform: CGAffineTransform = .identity
-            Task {
-                do {
-                    loadedSize = try await track.load(.naturalSize)
-                    loadedTransform = try await track.load(.preferredTransform)
-                } catch {
-                    // Use defaults
-                }
-                group.leave()
-            }
-            group.wait()
-            size = loadedSize
-            txf = loadedTransform
-        } else {
-            size = track.naturalSize
-            txf = track.preferredTransform
-        }
+    public func getTrack(_ asset: AVURLAsset)->AVAssetTrack? {
+        return loadVideoTracks(asset)?.first
+    }
+
+    /// The rotation of a video track with [size] and transform [txf], both
+    /// already loaded. (This used to reload the track, and report 0 when its
+    /// size or transform could not be loaded.)
+    public func getVideoOrientation(_ size: CGSize,_ txf: CGAffineTransform)-> Int {
         if size.width == txf.tx && size.height == txf.ty {
             return 0
         } else if txf.tx == 0 && txf.ty == 0 {

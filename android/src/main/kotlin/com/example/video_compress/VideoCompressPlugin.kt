@@ -64,11 +64,21 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                         position.toLong(), result)
             }
             "getMediaInfo" -> {
-                val path = call.argument<String>("path")
-                result.success(Utility(channelName).getMediaInfoJson(context, path!!).toString())
+                // Answered exactly once: the info, or an error when the file
+                // cannot be read as media at all. (A read that threw used to
+                // escape the handler unanswered by the plugin.)
+                val json = try {
+                    Utility(channelName).getMediaInfoJson(context, call.argument<String>("path")!!)
+                } catch (e: Exception) {
+                    result.error(channelName, "getMediaInfo error", e.message)
+                    return
+                }
+                result.success(json.toString())
             }
             "deleteAllCache" -> {
-                result.success(Utility(channelName).deleteAllCache(context, result));
+                // Answered once. (Utility.deleteAllCache used to answer too,
+                // so every call was answered twice.)
+                result.success(Utility(channelName).deleteAllCache(context))
             }
             "setLogLevel" -> {
                 val logLevel = call.argument<Int>("logLevel")!!
