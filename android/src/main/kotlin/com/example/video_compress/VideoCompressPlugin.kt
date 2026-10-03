@@ -17,6 +17,7 @@ import com.otaliastudios.transcoder.internal.utils.Logger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
+import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -32,7 +33,11 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
     private var _channel: MethodChannel? = null
     private val TAG = "VideoCompressPlugin"
     private val LOG = Logger(TAG)
-    private var transcodeFuture:Future<Void>? = null
+    /**
+     * The compress running now, if any: what `cancelCompression` stops.
+     * Read and written on the main thread only.
+     */
+    private var pending: PendingCompress? = null
     var channelName = "video_compress"
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -71,7 +76,16 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 result.success(true);
             }
             "cancelCompression" -> {
-                transcodeFuture?.cancel(true)
+                // Future.cancel answers true only while the transcode has not
+                // finished. A transcode cancelled before its worker started
+                // never reaches a listener callback, so the cancel is answered
+                // here, once; the engine's later callbacks only clean up.
+                val running = pending
+                if (running != null && running.future?.cancel(true) == true) {
+                    pending = null
+                    File(running.destPath).delete()
+                    running.answer { it.success(cancelledJson()) }
+                }
                 result.success(false);
             }
             "compressVideo" -> {
@@ -85,7 +99,11 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
 
                 val tempDir: String = context.getExternalFilesDir("video_compress")!!.absolutePath
                 val out = SimpleDateFormat("yyyy-MM-dd hh-mm-ss").format(Date())
-                val destPath: String = tempDir + File.separator + "VID_" + out + path.hashCode() + ".mp4"
+                // The UUID keeps two compresses of one video in the same
+                // second apart: a cancelled transcode still winding down
+                // deletes its own output, never the next compress's.
+                val destPath: String = tempDir + File.separator + "VID_" + out + path.hashCode() +
+                        "_" + UUID.randomUUID() + ".mp4"
 
                 var videoTrackStrategy: TrackStrategy = DefaultVideoStrategy.atMost(340).build();
                 val audioTrackStrategy: TrackStrategy
@@ -145,30 +163,52 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 }
 
 
-                transcodeFuture = Transcoder.into(destPath!!)
+                val compress = PendingCompress(destPath, result)
+                pending = compress
+                compress.future = Transcoder.into(destPath)
                         .addDataSource(dataSource)
                         .setAudioTrackStrategy(audioTrackStrategy)
                         .setVideoTrackStrategy(videoTrackStrategy)
                         .setListener(object : TranscoderListener {
                             override fun onTranscodeProgress(progress: Double) {
-                                channel.invokeMethod("updateProgress", progress * 100.00)
+                                if (!compress.answered) {
+                                    channel.invokeMethod("updateProgress", progress * 100.00)
+                                }
                             }
                             override fun onTranscodeCompleted(successCode: Int) {
+                                if (pending === compress) pending = null
+                                if (compress.answered) {
+                                    // Already answered as cancelled: no output.
+                                    File(destPath).delete()
+                                    return
+                                }
                                 channel.invokeMethod("updateProgress", 100.00)
-                                val json = Utility(channelName).getMediaInfoJson(context, destPath)
+                                val json = try {
+                                    Utility(channelName).getMediaInfoJson(context, destPath)
+                                } catch (e: Exception) {
+                                    File(destPath).delete()
+                                    compress.answer { it.error(channelName, "compressVideo error", e.message) }
+                                    return
+                                }
                                 json.put("isCancel", false)
-                                result.success(json.toString())
+                                compress.answer { it.success(json.toString()) }
                                 if (deleteOrigin) {
                                     File(path).delete()
                                 }
                             }
 
                             override fun onTranscodeCanceled() {
-                                result.success(null)
+                                if (pending === compress) pending = null
+                                // Nothing was compressed: no path, and the
+                                // partial output is deleted.
+                                File(destPath).delete()
+                                compress.answer { it.success(cancelledJson()) }
                             }
 
                             override fun onTranscodeFailed(exception: Throwable) {
-                                result.success(null)
+                                if (pending === compress) pending = null
+                                File(destPath).delete()
+                                compress.answer { it.error(channelName, "compressVideo error", exception.message) }
                             }
                         }).transcode()
             }
@@ -193,6 +233,25 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
         channel.setMethodCallHandler(this)
         _context = context
         _channel = channel
+    }
+
+    private fun cancelledJson(): String = JSONObject().put("isCancel", true).toString()
+
+    /**
+     * One compress: its output path and its result, answered exactly once
+     * (the cancel and the engine's own callback can both try to answer).
+     * Main thread only.
+     */
+    private class PendingCompress(val destPath: String, private val result: MethodChannel.Result) {
+        var future: Future<Void>? = null
+        var answered = false
+            private set
+
+        fun answer(reply: (MethodChannel.Result) -> Unit) {
+            if (answered) return
+            answered = true
+            reply(result)
+        }
     }
 
     companion object {

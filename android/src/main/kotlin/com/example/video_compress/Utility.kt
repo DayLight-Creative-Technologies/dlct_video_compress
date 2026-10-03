@@ -76,38 +76,43 @@ class Utility(private val channelName: String) {
         return json
     }
 
-    fun getBitmap(path: String, position: Long, result: MethodChannel.Result): Bitmap {
-        var bitmap: Bitmap? = null
+    /**
+     * The frame at [positionMs] milliseconds (the unit the Dart API documents;
+     * it used to be passed to getFrameAtTime as microseconds, so
+     * `position: 1000` asked for the frame 1 ms in), scaled to at most 512 px.
+     * A negative position is any frame. Null when the frame cannot be read:
+     * the caller answers, exactly once. (This used to answer an error AND an
+     * unencodable success, then throw on the null bitmap.)
+     */
+    fun getBitmap(path: String, positionMs: Long): Bitmap? {
         val retriever = MediaMetadataRetriever()
-
-        try {
+        var bitmap: Bitmap? = try {
             retriever.setDataSource(path)
-            bitmap = retriever.getFrameAtTime(position, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-        } catch (ex: IllegalArgumentException) {
-            result.error(channelName, "Assume this is a corrupt video file", null)
+            val timeUs = if (positionMs < 0) -1L else positionMs * 1000L
+            retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
         } catch (ex: RuntimeException) {
-            result.error(channelName, "Assume this is a corrupt video file", null)
+            // IllegalArgumentException included: a corrupt or unreadable video.
+            null
         } finally {
             try {
                 retriever.release()
-            } catch (ex: RuntimeException) {
-                result.error(channelName, "Ignore failures while cleaning up", null)
+            } catch (ex: Exception) {
+                // A failure while cleaning up does not change the frame read.
             }
         }
 
-        if (bitmap == null) result.success(emptyArray<Int>())
-
-        val width = bitmap!!.width
-        val height = bitmap.height
+        val frame = bitmap ?: return null
+        val width = frame.width
+        val height = frame.height
         val max = Math.max(width, height)
         if (max > 512) {
             val scale = 512f / max
             val w = Math.round(scale * width)
             val h = Math.round(scale * height)
-            bitmap = Bitmap.createScaledBitmap(bitmap, w, h, true)
+            bitmap = Bitmap.createScaledBitmap(frame, w, h, true)
         }
 
-        return bitmap!!
+        return bitmap
     }
 
     fun getFileNameWithGifExtension(path: String): String {

@@ -87,8 +87,9 @@ private func loadTrackTotalSampleDataLength(_ track: AVAssetTrack) -> Int64 {
 
 public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
     private let channelName = "video_compress"
+    /// The export running now, if any: what `cancelCompression` stops.
+    /// Read and written on the main thread only.
     private var exporter: AVAssetExportSession? = nil
-    private var stopCommand = false
     private let channel: FlutterMethodChannel
     private let avController = AvController()
 
@@ -140,7 +141,11 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         }
     }
 
-    private func getBitMap(_ path: String,_ quality: NSNumber,_ position: NSNumber,_ result: FlutterResult)-> Data?  {
+    /// A JPEG of the frame at [position] milliseconds (the unit the Dart API
+    /// documents; it used to be read as seconds, so `position: 1000` asked
+    /// for the frame 1000 s in). A negative position is the first frame. Nil
+    /// when the video has no video track or the frame cannot be read.
+    private func getBitMap(_ path: String,_ quality: NSNumber,_ position: NSNumber)-> Data?  {
         let url = Utility.getPathUrl(path)
         let asset = avController.getVideoAsset(url)
         guard let track = avController.getTrack(asset) else { return nil }
@@ -149,7 +154,9 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         assetImgGenerate.appliesPreferredTrackTransform = true
 
         let timeScale = CMTimeScale(loadTrackFrameRate(track))
-        let time = CMTimeMakeWithSeconds(Float64(truncating: position),preferredTimescale: timeScale)
+        let positionSeconds = max(0, Float64(truncating: position) / 1000)
+        let requested = CMTimeMakeWithSeconds(positionSeconds, preferredTimescale: timeScale)
+        let time = CMTimeMinimum(requested, loadAssetDuration(asset))
         guard let img = try? assetImgGenerate.copyCGImage(at:time, actualTime: nil) else {
             return nil
         }
@@ -158,22 +165,29 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         return thumbnail.jpegData(compressionQuality: compressionQuality)
     }
 
+    /// Every path answers: a frame that cannot be read answers a FlutterError
+    /// (it used to answer nothing, so the Dart caller waited forever).
     private func getByteThumbnail(_ path: String,_ quality: NSNumber,_ position: NSNumber,_ result: FlutterResult) {
-        if let bitmap = getBitMap(path,quality,position,result) {
-            result(bitmap)
+        guard let bitmap = getBitMap(path,quality,position) else {
+            return result(FlutterError(code: channelName, message: "getByteThumbnail error",
+                                       details: "Could not read a frame of \(path)"))
         }
+        result(bitmap)
     }
 
+    /// Every path answers: a frame that cannot be read answers a FlutterError
+    /// (it used to answer nothing, so the Dart caller waited forever).
     private func getFileThumbnail(_ path: String,_ quality: NSNumber,_ position: NSNumber,_ result: FlutterResult) {
         let fileName = Utility.getFileName(path)
         let url = Utility.getPathUrl("\(Utility.basePath())/\(fileName).jpg")
-        Utility.deleteFile(path)
-        if let bitmap = getBitMap(path,quality,position,result) {
-            guard (try? bitmap.write(to: url)) != nil else {
-                return result(FlutterError(code: channelName,message: "getFileThumbnail error",details: "getFileThumbnail error"))
-            }
-            result(Utility.excludeFileProtocol(url.absoluteString))
+        guard let bitmap = getBitMap(path,quality,position) else {
+            return result(FlutterError(code: channelName, message: "getFileThumbnail error",
+                                       details: "Could not read a frame of \(path)"))
         }
+        guard (try? bitmap.write(to: url)) != nil else {
+            return result(FlutterError(code: channelName,message: "getFileThumbnail error",details: "getFileThumbnail error"))
+        }
+        result(Utility.excludeFileProtocol(url.absoluteString))
     }
 
     public func getMediaInfoJson(_ path: String)->[String : Any?] {
@@ -221,7 +235,7 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
 
     @objc private func updateProgress(timer:Timer) {
         let asset = timer.userInfo as! AVAssetExportSession
-        if(!stopCommand) {
+        if asset.status != .cancelled {
             channel.invokeMethod("updateProgress", arguments: "\(String(describing: asset.progress * 100))")
         }
     }
@@ -267,7 +281,10 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         let sourceVideoType = "mp4"
 
         let sourceVideoAsset = avController.getVideoAsset(sourceVideoUrl)
-        let sourceVideoTrack = avController.getTrack(sourceVideoAsset)
+        guard let sourceVideoTrack = avController.getTrack(sourceVideoAsset) else {
+            return result(FlutterError(code: channelName, message: "compressVideo error",
+                                       details: "No video track in \(path)"))
+        }
 
         let uuid = NSUUID()
         let compressionUrl =
@@ -287,9 +304,12 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
 
         let isIncludeAudio = includeAudio != nil ? includeAudio! : true
 
-        let session = getComposition(isIncludeAudio, timeRange, sourceVideoTrack!)
+        let session = getComposition(isIncludeAudio, timeRange, sourceVideoTrack)
 
-        let exporter = AVAssetExportSession(asset: session, presetName: getExportPreset(quality))!
+        guard let exporter = AVAssetExportSession(asset: session, presetName: getExportPreset(quality)) else {
+            return result(FlutterError(code: channelName, message: "compressVideo error",
+                                       details: "Cannot export \(path) with preset \(getExportPreset(quality))"))
+        }
 
         exporter.outputURL = compressionUrl
         exporter.outputFileType = AVFileType.mp4
@@ -305,43 +325,57 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             exporter.timeRange = timeRange
         }
 
-        Utility.deleteFile(compressionUrl.absoluteString)
+        Utility.deleteFile(compressionUrl.path)
 
         let timer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(self.updateProgress),
                                          userInfo: exporter, repeats: true)
 
+        // The outcome is read from this export's own status, on the main
+        // thread: a cancel is this export's, never a flag a later compress
+        // could inherit (a cancel that arrived after the export finished
+        // used to leave a stop flag set, so the next compress answered
+        // "cancelled" with the INPUT's path).
         exporter.exportAsynchronously(completionHandler: {
-            timer.invalidate()
-            if(self.stopCommand) {
-                self.stopCommand = false
-                var json = self.getMediaInfoJson(path)
-                json["isCancel"] = true
-                let jsonString = Utility.keyValueToJson(json)
-                return result(jsonString)
-            }
-            if deleteOrigin {
-                let fileManager = FileManager.default
-                do {
-                    if fileManager.fileExists(atPath: path) {
-                        try fileManager.removeItem(atPath: path)
-                    }
+            DispatchQueue.main.async {
+                timer.invalidate()
+                if self.exporter === exporter {
                     self.exporter = nil
-                    self.stopCommand = false
                 }
-                catch let error as NSError {
-                    print(error)
+                switch exporter.status {
+                case .completed:
+                    if deleteOrigin {
+                        let fileManager = FileManager.default
+                        do {
+                            if fileManager.fileExists(atPath: path) {
+                                try fileManager.removeItem(atPath: path)
+                            }
+                        }
+                        catch let error as NSError {
+                            print(error)
+                        }
+                    }
+                    var json = self.getMediaInfoJson(compressionUrl.path)
+                    json["isCancel"] = false
+                    result(Utility.keyValueToJson(json))
+                case .cancelled:
+                    // No path: nothing was compressed, and the partial output
+                    // is deleted.
+                    try? FileManager.default.removeItem(at: compressionUrl)
+                    result(Utility.keyValueToJson(["isCancel": true]))
+                default:
+                    try? FileManager.default.removeItem(at: compressionUrl)
+                    result(FlutterError(code: self.channelName,
+                                        message: "compressVideo error",
+                                        details: exporter.error?.localizedDescription))
                 }
             }
-            var json = self.getMediaInfoJson(Utility.excludeEncoding(compressionUrl.path))
-            json["isCancel"] = false
-            let jsonString = Utility.keyValueToJson(json)
-            result(jsonString)
         })
         self.exporter = exporter
     }
 
+    /// Stops the export running now; one that already finished, or none at
+    /// all, leaves nothing behind for a later compress.
     private func cancelCompression(_ result: FlutterResult) {
-        stopCommand = true
         exporter?.cancelExport()
         result("")
     }

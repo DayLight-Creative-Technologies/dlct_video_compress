@@ -1,3 +1,52 @@
+## 3.1.5+dlct.2 (DLCT Fork)
+
+- iOS/macOS (SSK gap #896): `cancelCompression` stops only the export running
+  now. The stop flag (`stopCommand`) is gone: a cancel that arrived after an
+  export had finished left it set, so the NEXT compress ran to the end and
+  then answered `isCancel: true` with the INPUT's path. The outcome is read
+  from each export's own `status`, on the main thread (the progress timer is
+  invalidated there too). macOS never set `exporter`, so its cancel stopped
+  nothing; it does now.
+- iOS/macOS (#896): a cancelled compress answers `{"isCancel": true}` with no
+  `path` (it answered the input's media info) and deletes its partial output.
+  A failed export answers a `FlutterError` and deletes its partial output (it
+  answered the missing or partial output's media info as a success). A video
+  with no video track, or one no export session accepts, answers a
+  `FlutterError` instead of crashing on a force unwrap. iOS reads the output's
+  media info from `URL.path` (already decoded); it percent-decoded it again
+  with a force unwrap, which crashed on a file name containing `%`.
+- Android (#896): a cancelled compress answers `{"isCancel": true}` (it
+  answered null, the same as a failure); a failed one answers an error. Each
+  compress answers exactly once, and a cancel that stops a transcode answers
+  at once: a transcode cancelled before its worker started never reaches a
+  listener callback, so it never answered. Cancelled and failed compresses
+  delete their partial output; output names carry a UUID so a cancelled
+  transcode still winding down never deletes the next compress's output. A
+  completed transcode whose media info cannot be read answers an error
+  instead of throwing on the main thread.
+- iOS/macOS: `Utility.deleteFile` checks `url.path` (it checked
+  `absoluteString`, so it never deleted anything). `getFileThumbnail` no
+  longer calls it on the SOURCE video's path, which would now delete the
+  user's video. macOS output names carry a UUID (as iOS's do), so compressing
+  an earlier output can no longer delete it as "the previous output".
+- iOS/macOS (SSK gap #897): `getByteThumbnail` / `getFileThumbnail` answer a
+  `FlutterError` when no frame can be read; they answered nothing, so the
+  Dart caller waited forever.
+- Android: a thumbnail whose frame cannot be read answers one error. It
+  answered an error AND an unencodable success, then threw on the null
+  bitmap; a failed thumbnail write answers an error instead of the path of a
+  file that was never written; a path with no extension no longer throws.
+- All platforms: thumbnail `position` is read in milliseconds, as the Dart API
+  documents. iOS/macOS read it as seconds (`position: 1000` asked for the
+  frame 1000 s in) and Android as microseconds. A negative position (the
+  default, -1) is the first frame on iOS/macOS and any frame on Android; a
+  position past the end is clamped to the video's duration on iOS/macOS.
+- Dart: `getFileThumbnail` throws a `StateError` naming the video when the
+  platform answers an error (it threw a null-check error). `compressVideo`
+  clears `isCompressing` on any throw, not only a `PlatformException`, so one
+  unexpected error no longer makes every later compress throw. First tests
+  of the method-channel contract (`test/video_compress_test.dart`).
+
 ## 3.1.5+dlct.1 (DLCT Fork)
 
 - Migrated to Flutter's built-in Kotlin support per the official plugin-author

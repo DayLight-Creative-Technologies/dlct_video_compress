@@ -7,43 +7,47 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 
-class ThumbnailUtility(channelName: String) {
+/**
+ * Every thumbnail request answers exactly once: a frame that cannot be read,
+ * or a file that cannot be written, answers an error.
+ */
+class ThumbnailUtility(private val channelName: String) {
     private val utility = Utility(channelName)
 
-    fun getByteThumbnail(path: String, quality: Int, position: Long, result: MethodChannel.Result) {
-        val bmp = utility.getBitmap(path, position, result)
+    fun getByteThumbnail(path: String, quality: Int, positionMs: Long, result: MethodChannel.Result) {
+        val bmp = utility.getBitmap(path, positionMs)
+            ?: return result.error(channelName, "getByteThumbnail error", "Could not read a frame of $path")
 
         val stream = ByteArrayOutputStream()
         bmp.compress(Bitmap.CompressFormat.JPEG, quality, stream)
         val byteArray = stream.toByteArray()
         bmp.recycle()
-        result.success(byteArray.toList().toByteArray())
+        result.success(byteArray)
     }
 
-    fun getFileThumbnail(context: Context, path: String, quality: Int, position: Long,
+    fun getFileThumbnail(context: Context, path: String, quality: Int, positionMs: Long,
                              result: MethodChannel.Result) {
-        val bmp = utility.getBitmap(path, position, result)
+        val bmp = utility.getBitmap(path, positionMs)
+            ?: return result.error(channelName, "getFileThumbnail error", "Could not read a frame of $path")
 
         val dir = context.getExternalFilesDir("video_compress")
 
         if (dir != null && !dir.exists()) dir.mkdirs()
 
-        val file = File(dir, path.substring(path.lastIndexOf('/'),
-                path.lastIndexOf('.')) + ".jpg")
+        val file = File(dir, File(path).nameWithoutExtension + ".jpg")
         utility.deleteFile(file)
 
         val stream = ByteArrayOutputStream()
         bmp.compress(Bitmap.CompressFormat.JPEG, quality, stream)
         val byteArray = stream.toByteArray()
+        bmp.recycle()
 
         try {
             file.createNewFile()
             file.writeBytes(byteArray)
         } catch (e: IOException) {
-            e.printStackTrace()
+            return result.error(channelName, "getFileThumbnail error", e.message)
         }
-
-        bmp.recycle()
 
         result.success(file.absolutePath)
     }

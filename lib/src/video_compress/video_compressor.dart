@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -83,9 +82,14 @@ extension Compress on IVideoCompress {
       'position': position,
     }));
 
-    final file = File(Uri.decodeFull(filePath!));
+    // The platform answers an error when it cannot read a frame (it used to
+    // answer nothing on iOS, so this waited forever).
+    if (filePath == null) {
+      throw StateError(
+          'VideoCompress: getFileThumbnail could not read a frame of $path');
+    }
 
-    return file;
+    return File(Uri.decodeFull(filePath));
   }
 
   /// get media information from [path]
@@ -142,19 +146,26 @@ extension Compress on IVideoCompress {
 
     // ignore: invalid_use_of_protected_member
     setProcessingStatus(true);
-    final jsonStr = await _invoke<String>('compressVideo', {
-      'path': path,
-      'quality': quality.index,
-      'deleteOrigin': deleteOrigin,
-      'startTime': startTime,
-      'duration': duration,
-      'includeAudio': includeAudio,
-      'frameRate': frameRate,
-    });
+    final String? jsonStr;
+    try {
+      jsonStr = await _invoke<String>('compressVideo', {
+        'path': path,
+        'quality': quality.index,
+        'deleteOrigin': deleteOrigin,
+        'startTime': startTime,
+        'duration': duration,
+        'includeAudio': includeAudio,
+        'frameRate': frameRate,
+      });
+    } finally {
+      // Any throw (not only a PlatformException, which _invoke turns into
+      // null) used to leave isCompressing set, so every later compress threw.
+      // ignore: invalid_use_of_protected_member
+      setProcessingStatus(false);
+    }
 
-    // ignore: invalid_use_of_protected_member
-    setProcessingStatus(false);
-
+    // A failed compress answers null. A cancelled one answers a MediaInfo
+    // with isCancel true and no path: nothing was compressed.
     if (jsonStr != null) {
       final jsonMap = json.decode(jsonStr);
       return MediaInfo.fromJson(jsonMap);

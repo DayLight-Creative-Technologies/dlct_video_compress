@@ -34,10 +34,6 @@ class Utility: NSObject {
         return path.replacingOccurrences(of: "file://", with: "")
     }
     
-    static func excludeEncoding(_ path: String) -> String{
-        return path.removingPercentEncoding!
-    }
-    
     static func keyValueToJson(_ keyAndValue: [String : Any?])->String {
         let data = try! JSONSerialization.data(withJSONObject: keyAndValue as NSDictionary, options: [])
         let jsonString = NSString(data:data as Data,encoding: String.Encoding.utf8.rawValue)
@@ -46,7 +42,7 @@ class Utility: NSObject {
     
     static func deleteFile(_ path: String, clear: Bool = false) {
         let url = getPathUrl(path)
-        if fileManager.fileExists(atPath: url.absoluteString) {
+        if fileManager.fileExists(atPath: url.path) {
             try? fileManager.removeItem(at: url)
         }
         if clear {
