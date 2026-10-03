@@ -4,16 +4,21 @@ class MediaInfo {
   String? path;
   String? title;
   String? author;
-  /// The displayed width in pixels: the stored frame's height when
-  /// [orientation] is a quarter turn (90 or 270).
+  /// The stored frame's width in pixels turned by [orientation]: its height
+  /// when [orientation] is a quarter turn (90 or 270). This is the displayed
+  /// width of every video whose transform is a turn.
   int? width;
 
-  /// The displayed height in pixels: the stored frame's width when
-  /// [orientation] is a quarter turn (90 or 270).
+  /// The stored frame's height in pixels turned by [orientation]: its width
+  /// when [orientation] is a quarter turn (90 or 270). This is the displayed
+  /// height of every video whose transform is a turn.
   int? height;
 
   /// The clockwise turn, in degrees (0, 90, 180 or 270), that displays the
-  /// stored frames, the same on every platform. [Android] API level 17
+  /// stored frames, the same on every platform: the turn when the video's
+  /// transform is exactly a quarter, half or three-quarter turn, and 0 for
+  /// any other transform, a mirror included (Android cannot report a mirror;
+  /// iOS and macOS still display one mirrored). [Android] API level 17
   int? orientation;
 
   /// bytes

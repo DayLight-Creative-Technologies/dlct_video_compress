@@ -1,3 +1,73 @@
+## 3.1.5+dlct.7 (DLCT Fork)
+
+The iOS/macOS compress path uses AVFoundation's current APIs where the OS
+has them (SSK gap #911), and every platform reports the same orientation for
+a mirrored video (SSK gap #912). A compress is now tested by running one.
+
+- Orientation rule, the same on Android, iOS and macOS: `orientation` is 90,
+  180 or 270 when the video track's transform matrix is exactly that
+  clockwise quarter turn, and 0 for every other matrix: a horizontal or
+  vertical mirror, a mirror across either diagonal, a scale, or any other
+  angle. `width` and `height` are the stored size turned by `orientation`.
+  This is what Android cannot help reporting: its retriever's
+  `METADATA_KEY_VIDEO_ROTATION` comes from MPEG4Extractor, which recognizes
+  exactly the four quarter-turn track-header matrices and reports 0 for any
+  other (AOSP `MPEG4Extractor.cpp`, "We only support 0,90,180,270 degree
+  rotation matrices"; on an Android 16 emulator the four mirrored fixtures
+  report rotation "0", 64 x 48, and an unmirrored frame). `Utility.kt`
+  documents the rule; its code is unchanged.
+- iOS/macOS: `AvController.getVideoOrientation` applies that rule. Since
+  dlct.6 it rounded the rotation to the nearest quarter turn, so a
+  horizontal mirror reported 180 and a diagonal mirror 90 or 270 with its
+  width and height swapped, where Android reports 0 and the stored size. A
+  vertical mirror reported 0 before and after. Thumbnails are unchanged:
+  each platform's thumbnail is the frame as its own player shows it, so on
+  iOS/macOS a mirrored video's thumbnail is mirrored (and a diagonal
+  mirror's is 48 x 64 for a 64 x 48 report), on Android it is not.
+- iOS/macOS compress: the video-only composition takes the source's
+  preferred transform through `load(.preferredTransform)` on iOS 16+/macOS
+  13+ (the synchronous property is deprecated there) and the synchronous
+  property below. A transform that cannot be loaded answers
+  `compressVideo error` instead of an output displayed unturned. The video
+  composition of a compress at a set frame rate (every compress from Dart:
+  `frameRate` defaults to 30) is built with
+  `AVVideoComposition.Configuration` on iOS/macOS 26+, where
+  `AVMutableVideoComposition` is deprecated (only when compiled with Xcode
+  26, Swift 6.2; an older Xcode builds the next path), with the async
+  `AVMutableVideoComposition.videoComposition(withPropertiesOf:)` on iOS
+  16-25/macOS 13-15, and with `init(propertiesOf:)` below (deprecated since
+  iOS 18/macOS 15). Properties that cannot be loaded answer
+  `compressVideo error`. Outputs are otherwise unchanged.
+- iOS/macOS thumbnails: the frame is read with the async
+  `AVAssetImageGenerator.image(at:)` on iOS 16+/macOS 13+;
+  `copyCGImage(at:actualTime:)`, deprecated since iOS 18/macOS 15, stays
+  below.
+- iOS/macOS: `AvController.usesVideoCompositionConfiguration` (default
+  true), like `usesAsyncLoading`, is set false only by the native tests, to
+  run the iOS 16-25/macOS 13-15 video-composition path on a newer OS.
+- Dart: `MediaInfo.width`, `height` and `orientation` document the rule. No
+  code change.
+- Tests: `make_rotated_fixtures.swift` writes `video_quadrants.mp4` (64 x 48,
+  red, green / blue, white quadrants) and that video under the camera's
+  quarter, half and three-quarter turns (`video_rot90|180|270.mp4`, which
+  replace the earlier ones), a horizontal and vertical mirror
+  (`video_mirror_h|v.mp4`) and both diagonal mirrors
+  (`video_transpose.mp4`, `video_antitranspose.mp4`). `main.swift` checks
+  their exact orientation and size, that each thumbnail shows the frame as
+  AVFoundation displays it (size and quadrant colours), and runs a real
+  `compressVideo` of each, with SSK's arguments (1920x1080, audio, 30 fps)
+  and through the native call's other export paths (video only with and
+  without a frame rate, the whole asset without one): one answer, a
+  readable output of the input's length (± 50 ms), displayed with the same
+  aspect and quadrant colours as the input. Every check runs on each API
+  path the OS has. Dropping the transform from the video-only composition
+  fails 33 checks on every path; removing any one video-composition path's
+  result fails that path's 16 checks only. The dlct.6 sources fail the new
+  harness only on the orientation of `video_mirror_h.mp4` (180),
+  `video_transpose.mp4` (90) and `video_antitranspose.mp4` (270).
+  `MediaInfoJsonTest` pins the Android mapping of what Android 16's
+  retriever reported for each fixture.
+
 ## 3.1.5+dlct.6 (DLCT Fork)
 
 `getMediaInfo` reports a video's displayed size and its rotation the same

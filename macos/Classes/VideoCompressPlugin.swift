@@ -78,6 +78,65 @@ private func loadAssetDuration(_ asset: AVAsset) -> CMTime? {
     return duration
 }
 
+/// The frame [generator] makes at [time]; nil when it cannot be read.
+/// `copyCGImage(at:actualTime:)` is deprecated since macOS 15; `image(at:)`
+/// is its async replacement from macOS 13 on.
+private func loadImage(_ generator: AVAssetImageGenerator, at time: CMTime) -> CGImage? {
+    if #available(macOS 13.0, *), AvController.usesAsyncLoading {
+        var result: CGImage? = nil
+        let group = DispatchGroup()
+        group.enter()
+        Task {
+            result = try? await generator.image(at: time).image
+            group.leave()
+        }
+        group.wait()
+        return result
+    } else {
+        return try? generator.copyCGImage(at: time, actualTime: nil)
+    }
+}
+
+/// A video composition that renders [asset]'s video as it is displayed
+/// (each track's preferred transform applied, at the displayed size), one
+/// frame every [frameDuration]; nil when the asset's properties cannot be
+/// loaded. macOS 26+ builds it from an `AVVideoComposition.Configuration`
+/// (`AVMutableVideoComposition` is deprecated there), macOS 13-15 with the
+/// async `videoComposition(withPropertiesOf:)`, and older macOS with
+/// `init(propertiesOf:)`, deprecated since macOS 15 (SSK gap #911).
+private func loadVideoComposition(_ asset: AVAsset, frameDuration: CMTime) -> AVVideoComposition? {
+    if #available(macOS 13.0, *), AvController.usesAsyncLoading {
+        var result: AVVideoComposition? = nil
+        let group = DispatchGroup()
+        group.enter()
+        Task {
+            // The macOS 26 API is compiled only by a compiler that has its SDK
+            // (Xcode 26, Swift 6.2); an older Xcode builds the macOS 13 path.
+            #if compiler(>=6.2)
+            if #available(macOS 26.0, *), AvController.usesVideoCompositionConfiguration {
+                if var configuration = try? await AVVideoComposition.Configuration(for: asset) {
+                    configuration.frameDuration = frameDuration
+                    result = AVVideoComposition(configuration: configuration)
+                }
+                group.leave()
+                return
+            }
+            #endif
+            if let composition = try? await AVMutableVideoComposition.videoComposition(withPropertiesOf: asset) {
+                composition.frameDuration = frameDuration
+                result = composition
+            }
+            group.leave()
+        }
+        group.wait()
+        return result
+    } else {
+        let composition = AVMutableVideoComposition(propertiesOf: asset)
+        composition.frameDuration = frameDuration
+        return composition
+    }
+}
+
 // MARK: - Plugin
 
 public class VideoCompressPlugin: NSObject, FlutterPlugin {
@@ -153,7 +212,7 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         let requested = CMTimeMakeWithSeconds(positionSeconds, preferredTimescale: timeScale)
         // Clamped to the video's length when it is known.
         let time = loadAssetDuration(asset).map { CMTimeMinimum(requested, $0) } ?? requested
-        guard let img = try? assetImgGenerate.copyCGImage(at:time, actualTime: nil) else {
+        guard let img = loadImage(assetImgGenerate, at: time) else {
             return nil
         }
 
@@ -263,17 +322,23 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         }
     }
     
-    private func getComposition(_ isIncludeAudio: Bool,_ timeRange: CMTimeRange, _ sourceVideoTrack: AVAssetTrack)->AVAsset {
+    /// The asset to export: the source itself with its audio, or a
+    /// composition of its video track alone, displayed as the source is (its
+    /// preferred transform, loaded with `load(.preferredTransform)` on macOS
+    /// 13+, SSK gap #911). Nil when that transform cannot be loaded: without
+    /// it the output would be displayed unrotated.
+    private func getComposition(_ isIncludeAudio: Bool,_ timeRange: CMTimeRange, _ sourceVideoTrack: AVAssetTrack)->AVAsset? {
         let composition = AVMutableComposition()
         if !isIncludeAudio {
+            guard let transform = loadTrackPreferredTransform(sourceVideoTrack) else { return nil }
             let compressionVideoTrack = composition.addMutableTrack(withMediaType: AVMediaType.video, preferredTrackID: kCMPersistentTrackID_Invalid)
-            compressionVideoTrack!.preferredTransform = sourceVideoTrack.preferredTransform
+            compressionVideoTrack!.preferredTransform = transform
             try? compressionVideoTrack!.insertTimeRange(timeRange, of: sourceVideoTrack, at: CMTime.zero)
         } else {
             return sourceVideoTrack.asset!
         }
-        
-        return composition    
+
+        return composition
     }
     
     private func compressVideo(_ path: String,_ quality: NSNumber,_ deleteOrigin: Bool,_ startTime: Double?,
@@ -310,7 +375,10 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         
         let isIncludeAudio = includeAudio != nil ? includeAudio! : true
         
-        let session = getComposition(isIncludeAudio, timeRange, sourceVideoTrack)
+        guard let session = getComposition(isIncludeAudio, timeRange, sourceVideoTrack) else {
+            return result(FlutterError(code: channelName, message: "compressVideo error",
+                                       details: "Cannot read the orientation of \(path)"))
+        }
         
         guard let exporter = AVAssetExportSession(asset: session, presetName: getExportPreset(quality)) else {
             return result(FlutterError(code: channelName, message: "compressVideo error",
@@ -321,9 +389,12 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         exporter.outputFileType = AVFileType.mp4
         exporter.shouldOptimizeForNetworkUse = true
         
-        if frameRate != nil {
-            let videoComposition = AVMutableVideoComposition(propertiesOf: sourceVideoAsset)
-            videoComposition.frameDuration = CMTimeMake(value: 1, timescale: Int32(frameRate!))
+        if let frameRate = frameRate {
+            guard let videoComposition = loadVideoComposition(
+                sourceVideoAsset, frameDuration: CMTimeMake(value: 1, timescale: Int32(frameRate))) else {
+                return result(FlutterError(code: channelName, message: "compressVideo error",
+                                           details: "Cannot read the video properties of \(path)"))
+            }
             exporter.videoComposition = videoComposition
         }
         

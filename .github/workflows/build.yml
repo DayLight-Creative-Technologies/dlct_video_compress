@@ -96,9 +96,9 @@ jobs:
 
   # [DLCT] The macOS plugin's real sources (macos/Classes), compiled against a
   # FlutterMacOS stand-in, answer getMediaInfo, getByteThumbnail and
-  # getFileThumbnail on fixture files (native_tests/media_info), on both of
-  # its loading paths. The script exits non-zero on any failed check, and
-  # when no check ran.
+  # getFileThumbnail on fixture files (native_tests/media_info) and compress
+  # the turned and mirrored ones for real, on each of its API paths. The
+  # script exits non-zero on any failed check, and when no check ran.
   native-test-macos:
     name: "Native unit tests (macOS)"
     runs-on: macos-latest
@@ -107,8 +107,9 @@ jobs:
       - name: Run the plugin's macOS logic
         run: native_tests/media_info/run_macos.sh
 
-  # [DLCT] The same checks on the iOS plugin's real Swift sources
-  # (ios/Classes), compiled against a Flutter stand-in and run inside
+  # [DLCT] The same checks, real compresses included, on the iOS plugin's
+  # real Swift sources (ios/Classes), compiled against a Flutter stand-in and
+  # run inside
   # simulators of the newest and the oldest iOS runtime the runner has. The
   # script exits non-zero on any failed check, when a run reports no passed
   # checks, and when no runtime is installed.

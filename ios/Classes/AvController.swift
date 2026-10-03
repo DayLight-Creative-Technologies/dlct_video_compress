@@ -8,6 +8,13 @@ class AvController: NSObject {
     /// path on a newer OS as well.
     static var usesAsyncLoading = true
 
+    /// Whether a compress at a set frame rate builds its video composition
+    /// from `AVVideoComposition.Configuration` where the OS has it (iOS
+    /// 26.0+) rather than with `AVMutableVideoComposition`'s async factory.
+    /// Only the native tests set it false, to run the iOS 16-25 path on a
+    /// newer OS as well.
+    static var usesVideoCompositionConfiguration = true
+
     public func getVideoAsset(_ url:URL)->AVURLAsset {
         return AVURLAsset(url: url)
     }
@@ -42,16 +49,28 @@ class AvController: NSObject {
         return loadVideoTracks(asset)?.first
     }
 
-    /// The clockwise turn, in degrees (0, 90, 180 or 270), that a track's
-    /// preferred transform [txf] applies: the angle of its rotation, to the
-    /// nearest quarter turn. Android reports the same angle for the same
-    /// file. The transform's translation only moves the turned frame back
-    /// into view. (The angle used to be read from the translation, so an
-    /// untransformed track reported 90 and a portrait iPhone video 270, SSK
-    /// gap #907.)
+    /// The clockwise turn, in degrees, that a track's preferred transform
+    /// [txf] applies. The rule, the same on every platform (SSK gap #912):
+    /// 90, 180 or 270 when the transform's matrix is exactly that quarter
+    /// turn, and 0 for every other matrix: the identity, a mirror
+    /// (horizontal, vertical, or across a diagonal), a scale, or any other
+    /// angle. The translation is ignored: it only moves the turned frame back
+    /// into view. This is the rotation Android's MediaMetadataRetriever
+    /// reports for the same file: MPEG4Extractor recognizes exactly these
+    /// four track-header matrices and reports 0 for any other (verified on
+    /// Android 16 with the mirrored fixtures). A mirror is not a turn, so a
+    /// mirrored video reports 0 and its stored size, although AVFoundation
+    /// displays (and thumbnails) it mirrored. (Until 3.1.5+dlct.7 the angle
+    /// was the rotation rounded to the nearest quarter turn, so a horizontal
+    /// mirror reported 180 and a diagonal mirror 90 or 270; before
+    /// 3.1.5+dlct.6 it was read from the translation, SSK gap #907.)
     public func getVideoOrientation(_ txf: CGAffineTransform)-> Int {
-        let quarterTurns = Int((atan2(txf.b, txf.a) / (.pi / 2)).rounded())
-        return (quarterTurns % 4 + 4) % 4 * 90
+        switch (txf.a, txf.b, txf.c, txf.d) {
+        case (0, 1, -1, 0): return 90
+        case (-1, 0, 0, -1): return 180
+        case (0, -1, 1, 0): return 270
+        default: return 0
+        }
     }
 
     /// The displayed size of a track of [naturalSize] turned by

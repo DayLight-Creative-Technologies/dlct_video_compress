@@ -81,6 +81,15 @@ class Utility(private val channelName: String) {
      * author is "". The width and height are the displayed size: the
      * retriever reports the stored size, so a quarter turn (90 or 270) swaps
      * them. (They were swapped for 0 and 180 instead, SSK gap #906.) Pure.
+     *
+     * The orientation rule, the same on every platform (SSK gap #912): 90,
+     * 180 or 270 when the track's transform matrix is exactly that quarter
+     * turn, and 0 for every other matrix, a mirror (horizontal, vertical, or
+     * across a diagonal) included, with the stored size. Here the retriever
+     * applies it: MPEG4Extractor recognizes exactly those four track-header
+     * matrices and reports 0 for any other (verified on Android 16: the
+     * mirrored fixtures report rotation "0", 64 x 48, and an unmirrored
+     * frame). iOS and macOS apply it in `AvController.getVideoOrientation`.
      */
     internal fun mediaInfoJson(path: String, filesize: Long, metadata: RawMediaMetadata): JSONObject {
         var width = metadata.width?.toLongOrNull()

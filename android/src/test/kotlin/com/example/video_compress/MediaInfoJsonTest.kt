@@ -83,6 +83,39 @@ class MediaInfoJsonTest {
         }
     }
 
+    /**
+     * The cross-platform orientation rule (gap #912): a transform that is not
+     * exactly a quarter turn, a mirror included, reports 0 and the stored
+     * size. These are the strings Android 16's retriever reported for
+     * native_tests/media_info/fixtures/video_mirror_h.mp4, video_mirror_v.mp4,
+     * video_transpose.mp4 and video_antitranspose.mp4 (all stored 64 x 48),
+     * and for the quarter-turn fixtures, which keep their turn; iOS and macOS
+     * report the same for the same files (native_tests/media_info/main.swift).
+     */
+    @Test
+    fun mirroredTransformsReportNoTurnAndTheStoredSize() {
+        val reported = mapOf(
+            "video_mirror_h.mp4" to "0", "video_mirror_v.mp4" to "0",
+            "video_transpose.mp4" to "0", "video_antitranspose.mp4" to "0",
+            "video_rot90.mp4" to "90", "video_rot180.mp4" to "180", "video_rot270.mp4" to "270",
+        )
+        val expected = mapOf(
+            "video_mirror_h.mp4" to Triple(0, 64L, 48L), "video_mirror_v.mp4" to Triple(0, 64L, 48L),
+            "video_transpose.mp4" to Triple(0, 64L, 48L), "video_antitranspose.mp4" to Triple(0, 64L, 48L),
+            "video_rot90.mp4" to Triple(90, 48L, 64L), "video_rot180.mp4" to Triple(180, 64L, 48L),
+            "video_rot270.mp4" to Triple(270, 48L, 64L),
+        )
+        for ((name, rotation) in reported) {
+            val json = utility.mediaInfoJson("/$name", 5201L,
+                raw(duration = "1000", width = "64", height = "48", rotation = rotation))
+            val (orientation, width, height) = expected.getValue(name)
+
+            assertEquals("orientation of $name", orientation, json.get("orientation"))
+            assertEquals("width of $name", width, json.get("width"))
+            assertEquals("height of $name", height, json.get("height"))
+        }
+    }
+
     @Test
     fun noMetadataLeavesEveryNumberAbsent() {
         val json = utility.mediaInfoJson("/v.mp4", 10L, raw())
