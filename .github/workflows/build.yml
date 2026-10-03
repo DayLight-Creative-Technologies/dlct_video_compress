@@ -1,9 +1,9 @@
 name: Build the package
 
-# [DLCT] This repository is a GitHub fork. GitHub keeps a fork's workflows
-# dormant on push until they are enabled in the repository's Actions tab
-# (the same as dlct_background_downloader, SSK gap #859), so dispatch a run
-# for every release:
+# [DLCT] A push to master starts a run (verified 2026-10-03: the dlct.3 push
+# started run 37154891594, unlike dlct_background_downloader, SSK gap #859).
+# Watch that run. Dispatching another on the same ref cancels it through the
+# concurrency group below; dispatch only when no push run exists:
 #   gh workflow run build.yml --repo DayLight-Creative-Technologies/dlct_video_compress --ref master
 # SSK refuses a pin of this fork unless the pinned commit has a successful run
 # of this workflow; the gate requires jobs by name, so renaming a job breaks

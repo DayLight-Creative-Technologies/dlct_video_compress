@@ -8,9 +8,8 @@ No change to the plugin's runtime code (`lib/`, `android/src/main`,
   (`flutter test` on both), and debug builds of the example on the declared
   floor and on stable: `Build Android (min|stable)` (`flutter build apk`),
   `Build iOS (min|stable)` (`flutter build ios --no-codesign --simulator`) and
-  `Build macOS (min|stable)` (`flutter build macos`). The repository is a
-  GitHub fork, so runs are dispatched with `gh workflow run build.yml --ref
-  master`.
+  `Build macOS (min|stable)` (`flutter build macos`). A push to `master`
+  starts a run, although the repository is a GitHub fork.
 - Floor: `pubspec.yaml` now declares Flutter 3.44 / Dart 3.12 (it declared
   Flutter 2.0 / Dart 3.0, which has been false since dlct.1). dlct.1's built-in
   Kotlin migration removed `kotlin-android` from `android/build.gradle` and
