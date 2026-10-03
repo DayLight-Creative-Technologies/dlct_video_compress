@@ -123,6 +123,17 @@ extension Compress on IVideoCompress {
   /// determine whether to delete his source file by [deleteOrigin]
   /// optional parameters [startTime] [duration] [includeAudio] [frameRate]
   ///
+  /// [startTime] and [duration] are whole seconds: the compress exports the
+  /// part of the video from [startTime] (default 0) for [duration] (default:
+  /// to the end), cut at the end of the video, with or without audio, on
+  /// every platform. When they name no part of the video (a negative start, a
+  /// start at or past the end, a duration that is not positive) the compress
+  /// fails and answers null.
+  ///
+  /// A [cancelCompression] that arrives before this compress has answered
+  /// makes it answer a [MediaInfo] with `isCancel` true and no path, even when
+  /// the export had just finished; its output is deleted.
+  ///
   /// ## example
   /// ```dart
   /// final info = await _flutterVideoCompress.compressVideo(

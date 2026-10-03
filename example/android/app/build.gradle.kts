@@ -27,6 +27,17 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // [DLCT] Instrumentation tests run the real plugin on a device
+        // (src/androidTest; CI job "Native integration tests (Android)").
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // [DLCT] The instrumentation tests read the fixtures the iOS and macOS
+    // harness uses, from the test APK's assets.
+    sourceSets {
+        getByName("androidTest") {
+            assets.srcDir("../../../native_tests/media_info/fixtures")
+        }
     }
 
     buildTypes {
@@ -46,4 +57,10 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("junit:junit:4.13.2")
 }

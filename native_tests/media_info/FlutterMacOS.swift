@@ -32,7 +32,12 @@ public protocol FlutterBinaryMessenger {}
 
 public class FlutterMethodChannel: NSObject {
     public init(name: String, binaryMessenger: FlutterBinaryMessenger) {}
-    public func invokeMethod(_ method: String, arguments: Any?) {}
+    /// Called with each call the plugin makes to Dart (its progress), so the
+    /// tests can see a compress running.
+    public var onInvoke: ((String, Any?) -> Void)? = nil
+    public func invokeMethod(_ method: String, arguments: Any?) {
+        onInvoke?(method, arguments)
+    }
 }
 
 public protocol FlutterPluginRegistrar {

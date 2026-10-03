@@ -141,9 +141,9 @@ private func loadVideoComposition(_ asset: AVAsset, frameDuration: CMTime) -> AV
 
 public class VideoCompressPlugin: NSObject, FlutterPlugin {
     private let channelName = "video_compress"
-    /// The export running now, if any: what `cancelCompression` stops.
+    /// The compress running now, if any: what `cancelCompression` stops.
     /// Read and written on the main thread only.
-    private var exporter: AVAssetExportSession? = nil
+    private var pending: PendingCompress? = nil
     private let channel: FlutterMethodChannel
     private let avController = AvController()
     
@@ -294,13 +294,6 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
     }
     
     
-    @objc private func updateProgress(timer:Timer) {
-        let asset = timer.userInfo as! AVAssetExportSession
-        if asset.status != .cancelled {
-            channel.invokeMethod("updateProgress", arguments: "\(String(describing: asset.progress * 100))")
-        }
-    }
-    
     private func getExportPreset(_ quality: NSNumber)->String {
         switch(quality) {
         case 1:
@@ -325,71 +318,88 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
     /// The asset to export: the source itself with its audio, or a
     /// composition of its video track alone, displayed as the source is (its
     /// preferred transform, loaded with `load(.preferredTransform)` on macOS
-    /// 13+, SSK gap #911). Nil when that transform cannot be loaded: without
-    /// it the output would be displayed unrotated.
+    /// 13+, SSK gap #911). The composition holds [timeRange] of the track at
+    /// the same time it has in the source, so the one export range,
+    /// [timeRange], selects the same part of either asset (it used to be
+    /// inserted at 0 while the export range still started at the start time,
+    /// so a video-only compress from a start time > 0 exported the wrong part
+    /// or failed, SSK gap #913), and the source track's ID. Nil when the
+    /// transform cannot be loaded (without it the output would be displayed
+    /// unturned) or the range cannot be inserted.
     private func getComposition(_ isIncludeAudio: Bool,_ timeRange: CMTimeRange, _ sourceVideoTrack: AVAssetTrack)->AVAsset? {
-        let composition = AVMutableComposition()
-        if !isIncludeAudio {
-            guard let transform = loadTrackPreferredTransform(sourceVideoTrack) else { return nil }
-            let compressionVideoTrack = composition.addMutableTrack(withMediaType: AVMediaType.video, preferredTrackID: kCMPersistentTrackID_Invalid)
-            compressionVideoTrack!.preferredTransform = transform
-            try? compressionVideoTrack!.insertTimeRange(timeRange, of: sourceVideoTrack, at: CMTime.zero)
-        } else {
+        if isIncludeAudio {
             return sourceVideoTrack.asset!
         }
-
+        guard let transform = loadTrackPreferredTransform(sourceVideoTrack) else { return nil }
+        let composition = AVMutableComposition()
+        // The source track's ID: the video composition of a compress at a set
+        // frame rate is built from the source and names its track.
+        guard let compressionVideoTrack = composition.addMutableTrack(
+            withMediaType: AVMediaType.video, preferredTrackID: sourceVideoTrack.trackID) else { return nil }
+        compressionVideoTrack.preferredTransform = transform
+        guard (try? compressionVideoTrack.insertTimeRange(timeRange, of: sourceVideoTrack, at: timeRange.start)) != nil else {
+            return nil
+        }
         return composition
     }
-    
+
+    /// Exports [path] at [quality], [timeRange] of it only (`startTime`,
+    /// `duration`: AvController.exportRange), with its audio unless
+    /// [includeAudio] is false, at [frameRate] frames a second when one is
+    /// given. Answered exactly once (PendingCompress): the output's media
+    /// info with `isCancel` false; `{"isCancel": true}` with no path when
+    /// `cancelCompression` stopped it; or a `compressVideo error`. The export
+    /// range applies to every asset exported, so `startTime` and `duration`
+    /// are honoured with audio too (they were ignored whenever audio was
+    /// included, the default, SSK gap #913).
     private func compressVideo(_ path: String,_ quality: NSNumber,_ deleteOrigin: Bool,_ startTime: Double?,
                                _ duration: Double?,_ includeAudio: Bool?,_ frameRate: Int?,
                                _ result: @escaping FlutterResult) {
         let sourceVideoUrl = Utility.getPathUrl(path)
         let sourceVideoType = "mp4"
-        
+
         let sourceVideoAsset = avController.getVideoAsset(sourceVideoUrl)
         guard let sourceVideoTrack = avController.getTrack(sourceVideoAsset) else {
             return result(FlutterError(code: channelName, message: "compressVideo error",
                                        details: "No video track in \(path)"))
         }
-        
+
+        let uuid = NSUUID()
         let compressionUrl =
-            Utility.getPathUrl("\(Utility.basePath())/\(Utility.getFileName(path))\(NSUUID().uuidString).\(sourceVideoType)")
-        
-        // Without a length there is no time range to export (an invalid
-        // duration used to make a NaN time range).
+        Utility.getPathUrl("\(Utility.basePath())/\(Utility.getFileName(path))\(uuid.uuidString).\(sourceVideoType)")
+
+        // Without a length there is no time range to export (an unloadable
+        // duration used to be .zero: a 0 s export).
         guard let assetDuration = loadAssetDuration(sourceVideoAsset) else {
             return result(FlutterError(code: channelName, message: "compressVideo error",
                                        details: "Cannot read the duration of \(path)"))
         }
-        let timescale = assetDuration.timescale
-        let minStartTime = Double(startTime ?? 0)
+        guard let timeRange = avController.exportRange(startTime: startTime, duration: duration,
+                                                       length: assetDuration) else {
+            return result(FlutterError(
+                code: channelName, message: "compressVideo error",
+                details: "startTime \(String(describing: startTime)) and duration \(String(describing: duration)) name no part of the \(assetDuration.seconds) s of \(path)"))
+        }
 
-        let videoDuration = assetDuration.seconds
-        let minDuration = Double(duration ?? videoDuration)
-        let maxDurationTime = minStartTime + minDuration < videoDuration ? minDuration : videoDuration
-        
-        let cmStartTime = CMTimeMakeWithSeconds(minStartTime, preferredTimescale: timescale)
-        let cmDurationTime = CMTimeMakeWithSeconds(maxDurationTime, preferredTimescale: timescale)
-        let timeRange: CMTimeRange = CMTimeRangeMake(start: cmStartTime, duration: cmDurationTime)
-        
-        let isIncludeAudio = includeAudio != nil ? includeAudio! : true
-        
+        let isIncludeAudio = includeAudio ?? true
+
         guard let session = getComposition(isIncludeAudio, timeRange, sourceVideoTrack) else {
             return result(FlutterError(code: channelName, message: "compressVideo error",
-                                       details: "Cannot read the orientation of \(path)"))
+                                       details: "Cannot read the video track of \(path)"))
         }
-        
+
         guard let exporter = AVAssetExportSession(asset: session, presetName: getExportPreset(quality)) else {
             return result(FlutterError(code: channelName, message: "compressVideo error",
                                        details: "Cannot export \(path) with preset \(getExportPreset(quality))"))
         }
-        
-        exporter.outputURL = compressionUrl
-        exporter.outputFileType = AVFileType.mp4
+
         exporter.shouldOptimizeForNetworkUse = true
-        
+        exporter.timeRange = timeRange
+
         if let frameRate = frameRate {
+            // Built from the source, whose properties give the displayed
+            // render size; its instructions name the source's video track,
+            // whose ID a video-only composition keeps (getComposition).
             guard let videoComposition = loadVideoComposition(
                 sourceVideoAsset, frameDuration: CMTimeMake(value: 1, timescale: Int32(frameRate))) else {
                 return result(FlutterError(code: channelName, message: "compressVideo error",
@@ -397,73 +407,199 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
             }
             exporter.videoComposition = videoComposition
         }
-        
-        if !isIncludeAudio {
-            exporter.timeRange = timeRange
-        }
-        
+
         Utility.deleteFile(compressionUrl.path)
-        
-        let timer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(self.updateProgress),
-                                         userInfo: exporter, repeats: true)
-        
-        // The outcome is read from this export's own status, on the main
-        // thread: a cancel is this export's, never a flag a later compress
-        // could inherit. (The stop flag this replaces outlived a cancel that
-        // arrived after the export finished, and `exporter` was never set, so
-        // a cancel stopped nothing.)
-        exporter.exportAsynchronously(completionHandler: {
-            DispatchQueue.main.async {
-                timer.invalidate()
-                if self.exporter === exporter {
-                    self.exporter = nil
-                }
-                switch exporter.status {
-                case .completed:
-                    // An output that cannot be read is a failed compress, as
-                    // on Android, and the original is kept: it is deleted
-                    // only once the output is known to be readable (it used
-                    // to be deleted first).
-                    guard var json = self.getMediaInfoJson(compressionUrl.path) else {
-                        try? FileManager.default.removeItem(at: compressionUrl)
-                        result(FlutterError(code: self.channelName, message: "compressVideo error",
-                                            details: "Cannot read the compressed video"))
-                        return
-                    }
-                    if deleteOrigin {
-                        let fileManager = FileManager.default
-                        do {
-                            if fileManager.fileExists(atPath: path) {
-                                try fileManager.removeItem(atPath: path)
-                            }
-                        }
-                        catch let error as NSError {
-                            print(error)
-                        }
-                    }
-                    json["isCancel"] = false
-                    result(Utility.keyValueToJson(json))
-                case .cancelled:
-                    // No path: nothing was compressed, and the partial output
-                    // is deleted.
-                    try? FileManager.default.removeItem(at: compressionUrl)
-                    result(Utility.keyValueToJson(["isCancel": true]))
-                default:
-                    try? FileManager.default.removeItem(at: compressionUrl)
-                    result(FlutterError(code: self.channelName,
-                                        message: "compressVideo error",
-                                        details: exporter.error?.localizedDescription))
-                }
-            }
-        })
-        self.exporter = exporter
+
+        let channel = self.channel
+        let compress = PendingCompress(outputURL: compressionUrl, result: result) { percent in
+            channel.invokeMethod("updateProgress", arguments: "\(String(describing: percent))")
+        }
+        pending = compress
+        let finish: (ExportEnd) -> Void = { end in
+            self.finishCompress(compress, end, path, deleteOrigin)
+        }
+        // The macOS 15 API is compiled only by a compiler that has its SDK
+        // (Xcode 16, Swift 6.0); an older Xcode builds the older path only.
+        #if compiler(>=6.0)
+        if #available(macOS 15.0, *), AvController.usesAsyncExport {
+            exportWithAsyncAPI(exporter, compress, finish)
+            return
+        }
+        #endif
+        exportWithCompletionHandler(exporter, compress, finish)
     }
 
-    /// Stops the export running now; one that already finished, or none at
-    /// all, leaves nothing behind for a later compress.
+    #if compiler(>=6.0)
+    /// macOS 15+: `export(to:as:)`, its progress from `states(updateInterval:)`.
+    /// A cancel cancels the task the export runs in.
+    @available(macOS 15.0, *)
+    private func exportWithAsyncAPI(_ exporter: AVAssetExportSession, _ compress: PendingCompress,
+                                    _ finish: @escaping (ExportEnd) -> Void) {
+        let progress = Task {
+            for await state in exporter.states(updateInterval: 0.1) {
+                if case .exporting(let progress) = state {
+                    let percent = Float(progress.fractionCompleted) * 100
+                    DispatchQueue.main.async { compress.reportProgress(percent) }
+                }
+            }
+        }
+        let url = compress.outputURL
+        let export = Task {
+            let end: ExportEnd
+            do {
+                try await exporter.export(to: url, as: .mp4)
+                end = .completed
+            } catch {
+                end = Task.isCancelled || error is CancellationError
+                    ? .cancelled : .failed(error.localizedDescription)
+            }
+            progress.cancel()
+            AvController.exportEnded?(end.name)
+            DispatchQueue.main.async { finish(end) }
+        }
+        compress.stopExport = { export.cancel() }
+    }
+    #endif
+
+    /// Below macOS 15: `exportAsynchronously(completionHandler:)`, its outcome
+    /// from this export's own `status` (never a flag a later compress could
+    /// inherit: a cancel that arrived after the export finished used to leave
+    /// a stop flag set, so the next compress answered "cancelled" with the
+    /// INPUT's path, SSK gap #896).
+    private func exportWithCompletionHandler(_ exporter: AVAssetExportSession, _ compress: PendingCompress,
+                                             _ finish: @escaping (ExportEnd) -> Void) {
+        exporter.outputURL = compress.outputURL
+        exporter.outputFileType = AVFileType.mp4
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            compress.reportProgress(exporter.progress * 100)
+        }
+        exporter.exportAsynchronously(completionHandler: {
+            let end: ExportEnd
+            switch exporter.status {
+            case .completed: end = .completed
+            case .cancelled: end = .cancelled
+            default: end = .failed(exporter.error?.localizedDescription)
+            }
+            AvController.exportEnded?(end.name)
+            DispatchQueue.main.async {
+                timer.invalidate()
+                finish(end)
+            }
+        })
+        compress.stopExport = { exporter.cancelExport() }
+    }
+
+    /// Answers [compress] with how its export ended, on the main thread,
+    /// unless a cancel has answered it already: then whatever the export
+    /// wrote is deleted and nothing else happens (a late completion after a
+    /// cancel is ignored).
+    private func finishCompress(_ compress: PendingCompress, _ end: ExportEnd, _ path: String,
+                                _ deleteOrigin: Bool) {
+        if pending === compress {
+            pending = nil
+        }
+        let output = compress.outputURL
+        switch end {
+        case .completed:
+            // An output that cannot be read is a failed compress, as on
+            // Android, and the original is kept: it is deleted only once the
+            // output is known to be readable (it used to be deleted first).
+            guard var json = getMediaInfoJson(output.path) else {
+                try? FileManager.default.removeItem(at: output)
+                compress.answer(FlutterError(code: channelName, message: "compressVideo error",
+                                             details: "Cannot read the compressed video"))
+                return
+            }
+            json["isCancel"] = false
+            guard compress.answer(Utility.keyValueToJson(json)) else {
+                try? FileManager.default.removeItem(at: output)
+                return
+            }
+            if deleteOrigin {
+                let fileManager = FileManager.default
+                do {
+                    if fileManager.fileExists(atPath: path) {
+                        try fileManager.removeItem(atPath: path)
+                    }
+                }
+                catch let error as NSError {
+                    print(error)
+                }
+            }
+        case .cancelled:
+            // No path: nothing was compressed, and the partial output is
+            // deleted.
+            try? FileManager.default.removeItem(at: output)
+            compress.answer(Utility.keyValueToJson(["isCancel": true]))
+        case .failed(let message):
+            try? FileManager.default.removeItem(at: output)
+            compress.answer(FlutterError(code: channelName, message: "compressVideo error",
+                                         details: message))
+        }
+    }
+
+    /// Stops the compress running now and answers it `{"isCancel": true}`
+    /// at once, as on Android. The cancelled export removes its partial
+    /// output itself, and whatever its own end, arriving later, finds is
+    /// deleted (finishCompress), so the cancel leaves no output. A compress
+    /// that already answered, or none at all, leaves nothing behind for a
+    /// later compress.
     private func cancelCompression(_ result: FlutterResult) {
-        exporter?.cancelExport()
+        if let compress = pending {
+            pending = nil
+            compress.stopExport?()
+            compress.answer(Utility.keyValueToJson(["isCancel": true]))
+        }
         result("")
     }
-    
+
+}
+
+/// How a compress's export ended.
+private enum ExportEnd {
+    case completed
+    case cancelled
+    case failed(String?)
+
+    var name: String {
+        switch self {
+        case .completed: return "completed"
+        case .cancelled: return "cancelled"
+        case .failed: return "failed"
+        }
+    }
+}
+
+/// One compress: its output and its result, answered exactly once (a cancel
+/// and the export's own end can both try to answer it), how to stop its
+/// export, and where its progress goes until it is answered. Used on the
+/// main thread only: the export's own threads reach it through the main
+/// queue, which is what makes it safe to send there.
+private final class PendingCompress: @unchecked Sendable {
+    let outputURL: URL
+    private let result: FlutterResult
+    private let onProgress: (Float) -> Void
+    private(set) var answered = false
+    var stopExport: (() -> Void)? = nil
+
+    init(outputURL: URL, result: @escaping FlutterResult, onProgress: @escaping (Float) -> Void) {
+        self.outputURL = outputURL
+        self.result = result
+        self.onProgress = onProgress
+    }
+
+    /// Reports [percent] done, unless the compress has been answered.
+    func reportProgress(_ percent: Float) {
+        if !answered { onProgress(percent) }
+    }
+
+    /// Answers [value] unless the compress has been answered; whether it
+    /// answered.
+    @discardableResult
+    func answer(_ value: Any?) -> Bool {
+        if answered { return false }
+        answered = true
+        result(value)
+        return true
+    }
 }

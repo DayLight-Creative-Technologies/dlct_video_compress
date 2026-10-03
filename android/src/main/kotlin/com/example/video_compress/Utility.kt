@@ -20,6 +20,23 @@ internal data class RawMediaMetadata(
     val rotation: String?,
 )
 
+/**
+ * The part of a source [sourceDurationUs] long that a compress exports, the
+ * same rule on every platform (iOS/macOS: `AvController.exportRange`): from
+ * [startTime] seconds (default 0) for [duration] seconds (default: to the
+ * end), cut at the end of the source, as (start, end) in microseconds. Null
+ * when the arguments name no part of the source: a negative start, a start
+ * at or past the end, or a duration that is not positive. Pure.
+ */
+internal fun exportRangeUs(startTime: Long?, duration: Long?, sourceDurationUs: Long): Pair<Long, Long>? {
+    val startUs = (startTime ?: 0L) * 1_000_000L
+    if (startUs < 0 || startUs >= sourceDurationUs) return null
+    if (duration != null && duration <= 0) return null
+    val endUs = if (duration == null) sourceDurationUs
+        else minOf(startUs + duration * 1_000_000L, sourceDurationUs)
+    return Pair(startUs, endUs)
+}
+
 class Utility(private val channelName: String) {
 
     fun deleteFile(file: File) {

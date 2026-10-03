@@ -183,6 +183,36 @@ class PendingCompressTest {
     }
 
     @Test
+    fun cancelAfterTranscodeFinishedBeforeItsCallbackAnswersCancelledOnce() {
+        val result = RecordingResult()
+        val dest = destPath()
+        val compress = VideoCompressPlugin.PendingCompress(dest, result)
+        // The transcode has finished and written its output; its completion
+        // callback, posted to the main thread, has not run yet.
+        val transcode = FutureTask(Callable<Void> {
+            File(dest).writeBytes(ByteArray(4096) { 1 })
+            null
+        })
+        transcode.run()
+        assertTrue(transcode.isDone)
+        compress.future = transcode
+        setRunning(compress)
+
+        val cancelResult = cancelCompression()
+
+        assertAnsweredCancelledWithoutPath(result)
+        assertEquals(listOf("success"), cancelResult.answers)
+        assertFalse(File(dest).exists())
+        assertNull(running())
+
+        // The completion callback runs late and tries to answer the path.
+        compress.answer { it.success("""{"path":"$dest","isCancel":false}""") }
+
+        assertEquals(listOf("success"), result.answers)
+        assertTrue(JSONObject(result.successValue as String).getBoolean("isCancel"))
+    }
+
+    @Test
     fun failedCompressAnswersErrorOnce() {
         val result = RecordingResult()
         val compress = VideoCompressPlugin.PendingCompress(destPath(), result)

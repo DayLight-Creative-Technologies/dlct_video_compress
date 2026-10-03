@@ -1,3 +1,97 @@
+## 3.1.5+dlct.8 (DLCT Fork)
+
+`compressVideo` exports the part `startTime` and `duration` name, by one rule
+on every platform (SSK gap #913); iOS 18+/macOS 15+ export with
+`export(to:as:)` (SSK gap #914); a cancel answers the same way on every
+platform; and the Android plugin runs on emulators in CI.
+
+- The rule (iOS/macOS `AvController.exportRange`, Android `exportRangeUs`):
+  `startTime` and `duration` are whole seconds; the part exported runs from
+  `startTime` (default 0) for `duration` (default: to the end), cut at the
+  end of the video, with audio or without. A negative start, a start at or
+  past the end, or a duration that is not positive answers one
+  `compressVideo error` (Dart: null).
+- iOS/macOS (#913): with audio (the default) the source was exported with no
+  export range, so `startTime` and `duration` were ignored; without audio
+  the range was inserted at 0 while the export range still started at
+  `startTime`, so a start > 0 answered "The operation could not be
+  completed" without a frame rate and exported the wrong part (or black
+  frames) with one; a duration past the end was not cut. Now every asset is
+  exported with the one range, and a video-only composition holds the range
+  at its time in the source.
+- iOS/macOS: a video-only compress at a set frame rate (every video-only
+  compress from Dart) of a file whose video is not its first track answered
+  `compressVideo error`: the video composition, built from the source, names
+  the source's video track, and the composition's track got another ID. It
+  keeps the source track's ID.
+- Android (#913): `TrimDataSource`'s third argument is the part to cut from
+  the END; it was given the duration, so `startTime 0, duration 1` of a 3 s
+  video exported 2 s, and a duration longer than the rest of the video
+  failed. And Transcoder ends the whole source when its fastest track passes
+  the end: with audio the video ended up to 0.17 s early, without it frames
+  past the end were kept. `EndTrimDataSource` ends each track at its own
+  last sample before the end (`trimmedSource`); the start was already exact
+  (a seek to the key frame before it, nothing rendered up to it).
+  `startTime` and `duration` are read as any Number.
+- iOS 18+/macOS 15+ (#914): the export runs with
+  `AVAssetExportSession.export(to:as:)`, its progress from
+  `states(updateInterval:)`, and a cancel cancels its Task. The
+  `exportAsynchronously`/`status`/`error` path, deprecated there, stays
+  below, and is compiled alone by an Xcode older than 16 (Swift 6.0).
+  `AvController.usesAsyncExport` (default true), like the other switches, is
+  set false only by the native tests.
+- All platforms, cancel: a `cancelCompression` that reaches a compress not
+  yet answered answers it `{"isCancel": true}` with no path at once and
+  stops its export; whatever the export does later is ignored and its
+  output deleted, and no progress is reported after the answer. iOS/macOS
+  answered from the export's own status, and Android only when
+  `Future.cancel` stopped the transcode, so a cancel arriving after the
+  export finished but before its answer was delivered answered the path the
+  caller had cancelled. iOS/macOS keep each compress in a `PendingCompress`
+  that answers exactly once, as Android does.
+- Dart: `compressVideo` documents the rule and the cancel. No code change.
+- Tests (iOS/macOS, `native_tests/media_info`): `make_rotated_fixtures.swift`
+  also writes `video_timed.mp4` (3 s, red, green, blue a second each, key
+  frames at 0 and 1.5 s, one continuous AAC track), `video_long.mp4` (10 s of
+  1280 x 720 with audio) and `video_audio_first.mp4` (the quadrants with
+  audio as track 1). `checkTrim` runs six trims and five that name no part,
+  with audio and without, with a frame rate and without, and checks one
+  answer, the length of the output and of each track (± 50 ms), and the
+  colour of the first and last frame. `checkCancel` runs a cancel with
+  nothing running, one just after the start, one while progress is
+  reported, one after the export completed but before its answer was
+  delivered (the main thread waits on `AvController.exportEnded`, a test
+  hook), and a second cancel, each followed by a compress that completes:
+  one `{"isCancel": true}`, the export stopped (except when it had already
+  completed), no output left, no progress after the answer. Every check runs
+  on both export paths. 1954 checks pass on iOS 26.4 and macOS 27. The
+  dlct.7 sources fail 260 trim and track-ID checks (the cancel checks need
+  the hook). Removing the once-guard, the stop of either export, the cancel's
+  answer, the export range, the range's time in the composition, the track
+  ID, the cut at the end, or the deletion of a late completion's output
+  each fails checks on both platforms.
+- Tests (Android, JVM): `ExportRangeTest`, `EndTrimDataSourceTest` (drives
+  the source as Transcoder's reader does) and a `PendingCompressTest` case for
+  a cancel after the transcode finished. Reverting `trimmedSource` to
+  `TrimDataSource`'s end trim, the cancel condition, or either rule of
+  `EndTrimDataSource` fails them.
+- Tests (Android, device): `example/android/app/src/androidTest`
+  `VideoCompressPluginTest` calls the plugin's channel handler on the main
+  thread of a device: `getMediaInfo` of the turned and mirrored fixtures (the
+  orientation rule, from Android's own MediaMetadataRetriever), thumbnails,
+  SSK's compress (quality 7, audio, 30 fps), the trims, and the cancels (the
+  race on an audio-only input: a video transcode needs the main thread while
+  it runs). Its 9 tests pass on an Android 16 emulator; the dlct.7 sources
+  fail the trim and the race. On the emulator an output is up to 0.2 s off
+  the length asked for (AAC encoder padding; about half the decoded frames
+  reach the encoder, the last ones included), so lengths are checked to
+  ± 0.2 s there and each part's colours inside it.
+- CI: new job `Native integration tests (Android)` runs them on API 36 and
+  API 24 emulators and fails unless the report holds every `@Test` of the
+  class, passed (`native_tests/android/check_instrumentation_results.sh`).
+  `Native unit tests (Android)` also requires `ExportRangeTest` and
+  `EndTrimDataSourceTest`.
+
 ## 3.1.5+dlct.7 (DLCT Fork)
 
 The iOS/macOS compress path uses AVFoundation's current APIs where the OS

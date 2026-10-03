@@ -15,6 +15,36 @@ class AvController: NSObject {
     /// newer OS as well.
     static var usesVideoCompositionConfiguration = true
 
+    /// Whether a compress exports with `AVAssetExportSession.export(to:as:)`
+    /// where the OS has it (iOS 18.0+) rather than with
+    /// `exportAsynchronously(completionHandler:)`, deprecated there. Only the
+    /// native tests set it false, to run the older path on a newer OS as well.
+    static var usesAsyncExport = true
+
+    /// Called with how each compress's export itself ended: "completed",
+    /// "cancelled" or "failed", on the thread the export ended on, before the
+    /// compress is answered. Only the native tests set it, to see whether a
+    /// cancel stopped the export and to hold an answer back.
+    static var exportEnded: ((String) -> Void)? = nil
+
+    /// The part of a video of [length] that a compress exports, the same rule
+    /// on every platform: from [startTime] seconds (default 0) for [duration]
+    /// seconds (default: to the end), cut at the end of the video. Nil when
+    /// the arguments name no part of the video: a negative start, a start at
+    /// or past the end, or a duration that is not positive.
+    public func exportRange(startTime: Double?, duration: Double?, length: CMTime) -> CMTimeRange? {
+        let start = startTime ?? 0
+        let end = length.seconds
+        guard start >= 0, start < end else { return nil }
+        if let duration = duration, !(duration > 0) { return nil }
+        let timescale = max(length.timescale, 600)
+        let cmStart = CMTimeMakeWithSeconds(start, preferredTimescale: timescale)
+        let cmEnd = duration.map {
+            CMTimeMinimum(CMTimeMakeWithSeconds(start + $0, preferredTimescale: timescale), length)
+        } ?? length
+        return CMTimeRange(start: cmStart, end: cmEnd)
+    }
+
     public func getVideoAsset(_ url:URL)->AVURLAsset {
         return AVURLAsset(url: url)
     }

@@ -5,7 +5,7 @@ import android.net.Uri
 import android.util.Log
 import com.otaliastudios.transcoder.Transcoder
 import com.otaliastudios.transcoder.TranscoderListener
-import com.otaliastudios.transcoder.source.TrimDataSource
+import com.otaliastudios.transcoder.source.DataSource
 import com.otaliastudios.transcoder.source.UriDataSource
 import com.otaliastudios.transcoder.strategy.DefaultAudioStrategy
 import com.otaliastudios.transcoder.strategy.DefaultVideoStrategy
@@ -86,12 +86,17 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 result.success(true);
             }
             "cancelCompression" -> {
-                // Future.cancel answers true only while the transcode has not
-                // finished. A transcode cancelled before its worker started
-                // never reaches a listener callback, so the cancel is answered
-                // here, once; the engine's later callbacks only clean up.
+                // A compress not answered yet is answered here, once, as
+                // cancelled, the same rule as on iOS and macOS: a transcode
+                // cancelled before its worker started never reaches a
+                // listener callback, and one that finished but whose callback
+                // has not run yet would otherwise answer a path the caller
+                // asked to cancel (it used to: the cancel answered only when
+                // Future.cancel stopped the transcode). The engine's later
+                // callbacks only clean up.
                 val running = pending
-                if (running != null && running.future?.cancel(true) == true) {
+                if (running != null) {
+                    running.future?.cancel(true)
                     pending = null
                     File(running.destPath).delete()
                     running.answer { it.success(cancelledJson()) }
@@ -102,8 +107,9 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 val path = call.argument<String>("path")!!
                 val quality = call.argument<Int>("quality")!!
                 val deleteOrigin = call.argument<Boolean>("deleteOrigin")!!
-                val startTime = call.argument<Int>("startTime")
-                val duration = call.argument<Int>("duration")
+                // Whole seconds from Dart: an Integer, or a Long past 2^31.
+                val startTime = call.argument<Number>("startTime")?.toLong()
+                val duration = call.argument<Number>("duration")?.toLong()
                 val includeAudio = call.argument<Boolean>("includeAudio") ?: true
                 val frameRate = if (call.argument<Int>("frameRate")==null) 30 else call.argument<Int>("frameRate")
 
@@ -165,11 +171,37 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                     RemoveTrackStrategy()
                 }
 
-                val dataSource = if (startTime != null || duration != null){
-                    val source = UriDataSource(context, Uri.parse(path))
-                    TrimDataSource(source, (1000 * 1000 * (startTime ?: 0)).toLong(), (1000 * 1000 * (duration ?: 0)).toLong())
-                }else{
-                    UriDataSource(context, Uri.parse(path))
+                // The part exported (exportRangeUs, the rule iOS and macOS
+                // apply too; trimmedSource). (TrimDataSource's third
+                // argument is how much to cut from the END; it used to be
+                // given the duration, so a compress kept everything but the
+                // last `duration` seconds, and failed when the duration was
+                // longer than the rest of the video, SSK gap #913.)
+                val uri = Uri.parse(path)
+                val source = UriDataSource(context, uri)
+                val dataSource = if (startTime != null || duration != null) {
+                    val sourceDurationUs: Long
+                    val originUs: Long
+                    try {
+                        source.initialize()
+                        sourceDurationUs = source.durationUs
+                        originUs = firstSampleTimeUs(context, uri)
+                    } catch (e: Exception) {
+                        deinitializeQuietly(source)
+                        result.error(channelName, "compressVideo error", e.message)
+                        return
+                    }
+                    val range = exportRangeUs(startTime, duration, sourceDurationUs)
+                    if (range == null) {
+                        deinitializeQuietly(source)
+                        result.error(channelName, "compressVideo error",
+                            "startTime $startTime and duration $duration name no part of the " +
+                                "${sourceDurationUs / 1_000_000.0} s of $path")
+                        return
+                    }
+                    trimmedSource(source, range, originUs)
+                } else {
+                    source
                 }
 
 
@@ -246,6 +278,15 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun cancelledJson(): String = JSONObject().put("isCancel", true).toString()
+
+    /** Releases [source]'s extractor; a failure while cleaning up changes no answer. */
+    private fun deinitializeQuietly(source: DataSource) {
+        try {
+            source.deinitialize()
+        } catch (e: Exception) {
+            // Nothing to do: the compress already answers an error.
+        }
+    }
 
     /**
      * One compress: its output path and its result, answered exactly once
