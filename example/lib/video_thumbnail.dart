@@ -1,67 +1,72 @@
 import 'dart:io';
-import 'package:file_selector/file_selector.dart';
+
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:video_compress/video_compress.dart';
+import 'package:video_compress_example/main.dart';
 
 class VideoThumbnail extends StatefulWidget {
+  const VideoThumbnail({super.key});
+
   @override
-  _VideoThumbnailState createState() => _VideoThumbnailState();
+  State<VideoThumbnail> createState() => _VideoThumbnailState();
 }
 
 class _VideoThumbnailState extends State<VideoThumbnail> {
   File? _thumbnailFile;
+  String? _error;
+
+  Future<void> _getVideoThumbnail() async {
+    final path = await pickVideoPath();
+    if (path == null) {
+      return;
+    }
+    try {
+      final thumbnail = await VideoCompress.getFileThumbnail(path);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _thumbnailFile = thumbnail;
+        _error = null;
+      });
+    } on StateError catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _thumbnailFile = null;
+        _error = e.message;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    Future<Null> _getVideoThumbnail() async {
-      var file;
-
-      if (Platform.isMacOS) {
-        final typeGroup =
-            XTypeGroup(label: 'videos', extensions: ['mov', 'mp4']);
-        file = await openFile(acceptedTypeGroups: [typeGroup]);
-      } else {
-        final picker = ImagePicker();
-        var pickedFile = await picker.pickVideo(source: ImageSource.gallery);
-        file = File(pickedFile!.path);
-      }
-
-      if (file != null) {
-        _thumbnailFile = await VideoCompress.getFileThumbnail(file.path);
-        setState(() {
-          print(_thumbnailFile);
-        });
-      } else {
-        return null;
-      }
-    }
-
+    final thumbnail = _thumbnailFile;
+    final error = _error;
     return Scaffold(
-      appBar: AppBar(title: Text('File Thumbnail')),
+      appBar: AppBar(title: const Text('File Thumbnail')),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Container(
-                child: ElevatedButton(
-                    onPressed: _getVideoThumbnail,
-                    child: Text('Get File Thumbnail'))),
-            _buildThumbnail(),
+            ElevatedButton(
+              onPressed: _getVideoThumbnail,
+              child: const Text('Get File Thumbnail'),
+            ),
+            if (thumbnail != null)
+              Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Image(image: FileImage(thumbnail)),
+              ),
+            if (error != null)
+              Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Text(error),
+              ),
           ],
         ),
       ),
     );
-  }
-
-  Widget _buildThumbnail() {
-    if (_thumbnailFile != null) {
-      return Container(
-        padding: EdgeInsets.all(20.0),
-        child: Image(image: FileImage(_thumbnailFile!)),
-      );
-    }
-    return Container();
   }
 }

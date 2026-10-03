@@ -1,3 +1,42 @@
+## 3.1.5+dlct.3 (DLCT Fork)
+
+No change to the plugin's runtime code (`lib/`, `android/src/main`,
+`ios/Classes`, `macos/Classes`).
+
+- CI (SSK gap #900): `.github/workflows/build.yml` runs `Check linting`
+  (`flutter analyze --fatal-infos` on the plugin and the example), `Unit tests`
+  (`flutter test` on both), and debug builds of the example on the declared
+  floor and on stable: `Build Android (min|stable)` (`flutter build apk`),
+  `Build iOS (min|stable)` (`flutter build ios --no-codesign --simulator`) and
+  `Build macOS (min|stable)` (`flutter build macos`). The repository is a
+  GitHub fork, so runs are dispatched with `gh workflow run build.yml --ref
+  master`.
+- Floor: `pubspec.yaml` now declares Flutter 3.44 / Dart 3.12 (it declared
+  Flutter 2.0 / Dart 3.0, which has been false since dlct.1). dlct.1's built-in
+  Kotlin migration removed `kotlin-android` from `android/build.gradle` and
+  added a top-level `kotlin { compilerOptions {} }` block; that builds only on
+  Flutter 3.44+, whose Gradle plugin applies KGP to plugin modules itself.
+  The `min` build jobs pin Flutter 3.44.0.
+- Example: platform folders regenerated with Flutter 3.47.5's `flutter create`.
+  The iOS and macOS Podfiles named a `RunnerTests` target that neither
+  `Runner.xcodeproj` had, so `pod install` failed; both projects now have the
+  target, and both Podfiles are tracked. Android moves from Gradle 7.6.3 /
+  AGP 7.3 / Kotlin 1.9.10 (which failed on JDK 21+, "class file major version
+  65") to Gradle 9.1.0 / AGP 9.0.1 / Kotlin 2.3.21 with
+  `android.builtInKotlin=false`: AGP 9.0.1 is the newest AGP with full Kotlin
+  support on Flutter 3.44 (`maxKnownAgpVersionWithFullKotlinSupport`), so the
+  example builds on the floor and on stable. Kept: photo library, camera and
+  microphone usage descriptions (iOS) and the user-selected-file entitlement
+  (macOS). Dropped: unused `video_player`, `file_selector_macos` and
+  `cupertino_icons`, and the iOS arbitrary-loads exception (nothing in the
+  example loads from the network). `ios/Flutter/Flutter.podspec` is generated
+  and no longer tracked.
+- Example Dart code: `file_selector` 1.1 and `image_picker` 1.2; cancelling the
+  picker, a failed compress, a cancelled compress and an unreadable thumbnail
+  each show a message (each crashed on a null-assert before), and a second
+  compress while one runs is refused instead of throwing. A widget test covers
+  the home page.
+
 ## 3.1.5+dlct.2 (DLCT Fork)
 
 - iOS/macOS (SSK gap #896): `cancelCompression` stops only the export running

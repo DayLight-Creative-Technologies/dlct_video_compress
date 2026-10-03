@@ -12,6 +12,10 @@ pubspec.lock
 
 Podfile
 Podfile.lock
+# [DLCT] The example's Podfiles are tracked so a build uses the reviewed one
+# (an untracked Podfile named a RunnerTests target the project lacked).
+!example/ios/Podfile
+!example/macos/Podfile
 Pods/
 .symlinks/
 **/Flutter/App.framework/

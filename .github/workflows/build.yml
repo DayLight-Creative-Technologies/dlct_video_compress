@@ -1,0 +1,130 @@
+name: Build the package
+
+# [DLCT] This repository is a GitHub fork. GitHub keeps a fork's workflows
+# dormant on push until they are enabled in the repository's Actions tab
+# (the same as dlct_background_downloader, SSK gap #859), so dispatch a run
+# for every release:
+#   gh workflow run build.yml --repo DayLight-Creative-Technologies/dlct_video_compress --ref master
+# SSK refuses a pin of this fork unless the pinned commit has a successful run
+# of this workflow; the gate requires jobs by name, so renaming a job breaks
+# that gate on purpose.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # This is Dart 3.12.0. The floor is Flutter 3.44: android/build.gradle no
+  # longer applies kotlin-android and declares a top-level
+  # `kotlin { compilerOptions {} }` block (built-in Kotlin migration,
+  # 3.1.5+dlct.1). Flutter's Gradle plugin applies KGP to plugin modules
+  # itself only from 3.44 on, and 3.44 is the first release that builds the
+  # example's AGP 9 (android.builtInKotlin=false) on Gradle 9.1.
+  FLUTTER_MIN_SDK: '3.44.0'
+
+jobs:
+  lint:
+    name: "Check linting"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze --fatal-infos
+      - run: flutter pub get
+        working-directory: example
+      - run: flutter analyze --fatal-infos
+        working-directory: example
+
+  test:
+    name: "Unit tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          cache: true
+      - run: flutter pub get
+      - run: flutter test
+      - run: flutter pub get
+        working-directory: example
+      - run: flutter test
+        working-directory: example
+
+  build-android:
+    name: "Build Android (${{ matrix.sdk }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [ min, stable ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+      - uses: subosito/flutter-action@v2
+        with:
+          cache: true
+          flutter-version: ${{ matrix.sdk == 'min' && env.FLUTTER_MIN_SDK || '' }}
+          channel: stable
+      - run: flutter --version
+      - run: flutter pub get
+        working-directory: example
+      - name: Build example APK
+        working-directory: example
+        run: flutter build apk --debug
+
+  build-ios:
+    name: "Build iOS (${{ matrix.sdk }})"
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [ min, stable ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          cache: true
+          flutter-version: ${{ matrix.sdk == 'min' && env.FLUTTER_MIN_SDK || '' }}
+          channel: stable
+      - run: flutter --version
+      - run: flutter pub get
+        working-directory: example
+      - name: Build example iOS app
+        working-directory: example
+        run: flutter build ios --no-codesign --simulator --debug
+
+  build-macos:
+    name: "Build macOS (${{ matrix.sdk }})"
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [ min, stable ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          cache: true
+          flutter-version: ${{ matrix.sdk == 'min' && env.FLUTTER_MIN_SDK || '' }}
+          channel: stable
+      - run: flutter --version
+      - run: flutter pub get
+        working-directory: example
+      - name: Build example macOS app
+        working-directory: example
+        run: flutter build macos --debug
