@@ -242,7 +242,7 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
      * (the cancel and the engine's own callback can both try to answer).
      * Main thread only.
      */
-    private class PendingCompress(val destPath: String, private val result: MethodChannel.Result) {
+    internal class PendingCompress(val destPath: String, private val result: MethodChannel.Result) {
         var future: Future<Void>? = null
         var answered = false
             private set

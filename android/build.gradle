@@ -43,6 +43,11 @@ android {
         minSdkVersion 21
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+    // [DLCT] JVM unit tests: android.jar stubs (e.g. the Context the plugin
+    // must hold before it answers a call) return defaults instead of throwing.
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
     lintOptions {
         disable 'InvalidPackage'
     }
@@ -57,4 +62,8 @@ kotlin {
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
     implementation 'com.otaliastudios:transcoder:0.10.5'
+    testImplementation 'junit:junit:4.13.2'
+    // [DLCT] The android.jar stub of org.json returns null from toString();
+    // the cancel answer is a JSON string, so tests run the real org.json.
+    testImplementation 'org.json:json:20250517'
 }

@@ -61,6 +61,37 @@ jobs:
       - run: flutter test
         working-directory: example
 
+  # [DLCT] Kotlin JVM unit tests of the plugin's Android code, run with the
+  # example app as the Gradle host. The last step fails if the expected test
+  # suite produced no results or ran no tests, so a test source set that
+  # Gradle silently skips fails the job instead of passing it.
+  native-test-android:
+    name: "Native unit tests (Android)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+      - uses: subosito/flutter-action@v2
+        with:
+          cache: true
+      - run: flutter pub get
+        working-directory: example
+      - run: flutter build apk --config-only
+        working-directory: example
+      - name: Run Kotlin JVM unit tests
+        working-directory: example/android
+        run: ./gradlew :video_compress:testDebugUnitTest
+      - name: Fail if no Kotlin test ran
+        run: |
+          result=example/build/video_compress/test-results/testDebugUnitTest/TEST-com.example.video_compress.PendingCompressTest.xml
+          test -f "$result"
+          grep -q 'tests="[1-9][0-9]*"' "$result"
+          grep -h -o 'tests="[0-9]*"' "$result"
+
   build-android:
     name: "Build Android (${{ matrix.sdk }})"
     runs-on: ubuntu-latest

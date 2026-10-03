@@ -1,3 +1,27 @@
+## 3.1.5+dlct.4 (DLCT Fork)
+
+No change to the plugin's runtime behaviour.
+
+- Android: `PendingCompress` (the record that answers each compress exactly
+  once) is `internal` instead of `private`, so JVM unit tests can run it; its
+  logic is unchanged. `android/src/test/.../PendingCompressTest.kt` covers a
+  completed compress, a cancel before the transcode starts and a cancel during
+  it (both run the plugin's own `cancelCompression` handler; the second
+  deletes a real partial output file), a failed compress, and a second answer.
+  Each test answers twice, so each fails if the answer-once guard is removed.
+  `android/build.gradle` adds JUnit 4.13.2 and org.json (the `android.jar`
+  stub's `JSONObject.toString()` returns null) for tests only, and
+  `unitTests.returnDefaultValues`.
+- CI: `Native unit tests (Android)` runs `:video_compress:testDebugUnitTest`
+  with the example as the Gradle host, and fails if
+  `PendingCompressTest` produced no results or ran no tests.
+- iOS/macOS podspecs: deployment targets are iOS 13.0 (was 8.0) and macOS
+  10.15 (was 10.11), the minimums of the Flutter 3.44.0 floor: its
+  `packages/flutter_tools/bin/podhelper.rb` generates the `Flutter` pod with
+  `s.ios.deployment_target = '13.0'` and the `FlutterMacOS` pod with
+  `s.osx.deployment_target = '10.15'`, and strips any lower pod target so it
+  inherits the project's. The Swift uses nothing newer without `#available`.
+
 ## 3.1.5+dlct.3 (DLCT Fork)
 
 No change to the plugin's runtime code (`lib/`, `android/src/main`,
