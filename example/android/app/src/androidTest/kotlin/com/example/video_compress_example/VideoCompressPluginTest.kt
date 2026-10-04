@@ -248,7 +248,9 @@ class VideoCompressPluginTest {
             assertEquals("$name: orientation $json", orientation, json.getInt("orientation"))
             assertEquals("$name: width $json", size.first, json.getInt("width"))
             assertEquals("$name: height $json", size.second, json.getInt("height"))
-            assertTrue("$name: duration $json", abs(json.getLong("duration") - 1000) <= 50)
+            // 1000 on Android 16; 1067 on Android 7, whose extractor ignores
+            // the edit that hides the AAC encoder's priming.
+            assertTrue("$name: duration $json", abs(json.getLong("duration") - 1000) <= 100)
             assertEquals("$name: filesize $json", File(path).length(), json.getLong("filesize"))
         }
     }
@@ -311,8 +313,27 @@ class VideoCompressPluginTest {
      */
     private val lengthTolerance = 0.2
 
+    /**
+     * A compress of an audio-only file (no video encoder involved) keeps its
+     * sound: one answer with a path, an audio track of the input's length.
+     * On Android 7 it failed: Transcoder stamped the AAC decoder's last
+     * output 0 and the muxer refused it (MonotonicAudioDataSink).
+     */
+    @Test
+    fun audioOnlyCompressKeepsItsSound() {
+        val json = oneJson("compress audio_only.m4a", answersOf(call("compressVideo",
+            compressArguments(fixture("audio_only.m4a"), 0, true, 30))))
+        assertFalse("isCancel $json", json.getBoolean("isCancel"))
+        val path = json.getString("path")
+        val tracks = trackSeconds(path)
+        assertEquals("tracks $tracks", setOf("audio/"), tracks.keys)
+        assertTrue("audio track $tracks, expected 1 s", abs(tracks.getValue("audio/") - 1.0) <= lengthTolerance)
+        File(path).delete()
+    }
+
     /** SSK's call compresses for real: one answer, a readable output of the input's length. */
     @Test
+    @RequiresVideoEncoder
     fun sskCompressProducesTheVideo() {
         for ((name, seconds) in listOf(Pair("video_quadrants.mp4", 1.0), Pair("video_long.mp4", 10.0))) {
             val json = oneJson("compress $name", answersOf(sskCompress(name)))
@@ -352,6 +373,7 @@ class VideoCompressPluginTest {
      * [1 s, 2 s) ended on a blue frame).
      */
     @Test
+    @RequiresVideoEncoder
     fun compressExportsTheRequestedPart() {
         val trims = listOf(
             listOf(null, null, 3.0, "red", "blue"),
@@ -409,15 +431,16 @@ class VideoCompressPluginTest {
         assertTrue("$what: $json", json.getBoolean("isCancel"))
     }
 
-    /** A compress after a cancel completes normally: nothing is inherited. */
-    private fun assertNextCompressCompletes(what: String) {
-        val json = oneJson("compress after $what", answersOf(sskCompress("video_quadrants.mp4")))
+    /** A compress of [name] after a cancel completes normally: nothing is inherited. */
+    private fun assertNextCompressCompletes(what: String, name: String = "video_quadrants.mp4") {
+        val json = oneJson("compress after $what", answersOf(sskCompress(name)))
         assertFalse("compress after $what: $json", json.getBoolean("isCancel"))
         assertTrue("compress after $what: $json", File(json.getString("path")).exists())
         File(json.getString("path")).delete()
     }
 
     @Test
+    @RequiresVideoEncoder
     fun cancelWithNothingRunningAnswersOnce() {
         val all = answersOf(call("cancelCompression"), settle = 200)
         assertEquals(listOf(Pair("success", false)), all)
@@ -426,6 +449,7 @@ class VideoCompressPluginTest {
 
     /** A cancel in the same main-thread turn as the compress, before its transcode starts. */
     @Test
+    @RequiresVideoEncoder
     fun cancelJustAfterTheStartAnswersCancelledOnce() {
         val compress = Answers()
         val cancel = Answers()
@@ -441,6 +465,7 @@ class VideoCompressPluginTest {
     }
 
     @Test
+    @RequiresVideoEncoder
     fun cancelDuringTheTranscodeAnswersCancelledOnce() {
         val compress = sskCompress("video_long.mp4")
         val deadline = System.currentTimeMillis() + 300_000
@@ -476,7 +501,9 @@ class VideoCompressPluginTest {
      *
      * The input is audio only: a video transcode needs the main thread while
      * it runs (its decoder surface reports each frame there), so holding the
-     * main thread would fail it instead of letting it complete.
+     * main thread would fail it instead of letting it complete. So is the
+     * compress after it, so that this runs where no video encoder does
+     * (RequiresVideoEncoder).
      */
     @Test
     fun cancelRacingTheCompletionAnswersCancelledOnce() {
@@ -511,6 +538,6 @@ class VideoCompressPluginTest {
         assertEquals(listOf(Pair("success", false)), answersOf(cancel, settle = 0))
         assertOneCancel("cancel racing the completion", answersOf(compress, settle = 2000))
         assertEquals("outputs left", emptySet<String>(), outputs())
-        assertNextCompressCompletes("a cancel racing the completion")
+        assertNextCompressCompletes("a cancel racing the completion", "audio_only.m4a")
     }
 }

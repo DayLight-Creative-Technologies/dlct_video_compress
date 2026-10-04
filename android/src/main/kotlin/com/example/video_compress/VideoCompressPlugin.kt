@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import com.otaliastudios.transcoder.Transcoder
 import com.otaliastudios.transcoder.TranscoderListener
+import com.otaliastudios.transcoder.sink.DefaultDataSink
 import com.otaliastudios.transcoder.source.DataSource
 import com.otaliastudios.transcoder.source.UriDataSource
 import com.otaliastudios.transcoder.strategy.DefaultAudioStrategy
@@ -207,7 +208,9 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
 
                 val compress = PendingCompress(destPath, result)
                 pending = compress
-                compress.future = Transcoder.into(destPath)
+                // MonotonicAudioDataSink: on Android 7 every compress with
+                // audio failed without it.
+                compress.future = Transcoder.into(MonotonicAudioDataSink(DefaultDataSink(destPath)))
                         .addDataSource(dataSource)
                         .setAudioTrackStrategy(audioTrackStrategy)
                         .setVideoTrackStrategy(videoTrackStrategy)

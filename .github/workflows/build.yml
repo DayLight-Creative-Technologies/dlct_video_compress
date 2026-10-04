@@ -87,7 +87,7 @@ jobs:
         run: ./gradlew :video_compress:testDebugUnitTest
       - name: Fail if a Kotlin test class did not run
         run: |
-          for suite in PendingCompressTest MediaInfoTest MediaInfoJsonTest ExportRangeTest EndTrimDataSourceTest; do
+          for suite in PendingCompressTest MediaInfoTest MediaInfoJsonTest ExportRangeTest EndTrimDataSourceTest MonotonicAudioDataSinkTest; do
             result="example/build/video_compress/test-results/testDebugUnitTest/TEST-com.example.video_compress.$suite.xml"
             test -f "$result"
             grep -q 'tests="[1-9][0-9]*"' "$result"
@@ -99,9 +99,10 @@ jobs:
   # the device (getMediaInfo on the turned and mirrored fixtures, thumbnails,
   # SSK's compress, trims, and cancels), against Android's own
   # MediaMetadataRetriever, MediaCodec and Transcoder. They run on Android 16
-  # (API 36) and on API 24, the lowest any app on the Flutter floor runs on
-  # (Flutter 3.44's minSdk; the plugin declares 21). After each run the job
-  # fails unless the test class reported every @Test in its source, with no
+  # (API 36), all of them, and on API 24, the lowest any app on the Flutter
+  # floor runs on (Flutter 3.44's minSdk, and SSK's; the plugin declares 21),
+  # all but the ones that need a video encoder. After each run the job fails
+  # unless the test class reported every @Test it should have, with no
   # failure, error or skip.
   native-integration-test-android:
     name: "Native integration tests (Android)"
@@ -138,9 +139,13 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           working-directory: example/android
-          script: ./gradlew :app:connectedDebugAndroidTest
+          # On a failure, the plugin's and Transcoder's log lines show why.
+          script: ./gradlew :app:connectedDebugAndroidTest || (adb logcat -d | grep -E "TranscodeEngine|VideoCompress|MPEG4Writer|ACodec|DEBUG|Fatal" | tail -300; exit 1)
       - name: Fail unless every test ran and passed on API 36
         run: native_tests/android/check_instrumentation_results.sh api36
+      # The tests marked @RequiresVideoEncoder are left out here: this
+      # emulator's software H.264 encoder crashes the media server
+      # (example/android/app/src/androidTest/.../RequiresVideoEncoder.kt).
       - name: Run on Android 7.0 (API 24)
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -150,9 +155,9 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           working-directory: example/android
-          script: ./gradlew :app:connectedDebugAndroidTest
-      - name: Fail unless every test ran and passed on API 24
-        run: native_tests/android/check_instrumentation_results.sh api24
+          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notAnnotation=com.example.video_compress_example.RequiresVideoEncoder || (adb logcat -d | grep -E "TranscodeEngine|VideoCompress|MPEG4Writer|ACodec|DEBUG|Fatal" | tail -300; exit 1)
+      - name: Fail unless every other test ran and passed on API 24
+        run: native_tests/android/check_instrumentation_results.sh api24 --without-video-encoder
 
   # [DLCT] The macOS plugin's real sources (macos/Classes), compiled against a
   # FlutterMacOS stand-in, answer getMediaInfo, getByteThumbnail and

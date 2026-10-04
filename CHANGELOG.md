@@ -3,7 +3,8 @@
 `compressVideo` exports the part `startTime` and `duration` name, by one rule
 on every platform (SSK gap #913); iOS 18+/macOS 15+ export with
 `export(to:as:)` (SSK gap #914); a cancel answers the same way on every
-platform; and the Android plugin runs on emulators in CI.
+platform; a compress with audio works on Android 7; and the Android plugin
+runs on emulators in CI.
 
 - The rule (iOS/macOS `AvController.exportRange`, Android `exportRangeUs`):
   `startTime` and `duration` are whole seconds; the part exported runs from
@@ -33,6 +34,14 @@ platform; and the Android plugin runs on emulators in CI.
   last sample before the end (`trimmedSource`); the start was already exact
   (a seek to the key frame before it, nothing rendered up to it).
   `startTime` and `duration` are read as any Number.
+- Android 7: every compress with audio failed. Transcoder 0.10.5 stamps its
+  decoder's end-of-stream output 0, Android 7's AAC decoder still returns
+  sound in it, and Android 7's MPEG4Writer refuses the frame ("do not
+  support out of order frames ... for Audio track"), which fails the
+  transcode. `MonotonicAudioDataSink` drops an audio sample stamped before
+  the last one written (at most 23 ms of sound at the very end); video
+  samples pass unchanged (B-frames go back legitimately). Newer Android
+  muxers do not stop on it.
 - iOS 18+/macOS 15+ (#914): the export runs with
   `AVAssetExportSession.export(to:as:)`, its progress from
   `states(updateInterval:)`, and a cancel cancels its Task. The
@@ -71,26 +80,36 @@ platform; and the Android plugin runs on emulators in CI.
   ID, the cut at the end, or the deletion of a late completion's output
   each fails checks on both platforms.
 - Tests (Android, JVM): `ExportRangeTest`, `EndTrimDataSourceTest` (drives
-  the source as Transcoder's reader does) and a `PendingCompressTest` case for
-  a cancel after the transcode finished. Reverting `trimmedSource` to
-  `TrimDataSource`'s end trim, the cancel condition, or either rule of
-  `EndTrimDataSource` fails them.
+  the source as Transcoder's reader does), `MonotonicAudioDataSinkTest` and
+  a `PendingCompressTest` case for a cancel after the transcode finished.
+  Reverting `trimmedSource` to `TrimDataSource`'s end trim, the cancel
+  condition, either rule of `EndTrimDataSource`, or either rule of the sink
+  fails them.
 - Tests (Android, device): `example/android/app/src/androidTest`
   `VideoCompressPluginTest` calls the plugin's channel handler on the main
   thread of a device: `getMediaInfo` of the turned and mirrored fixtures (the
   orientation rule, from Android's own MediaMetadataRetriever), thumbnails,
-  SSK's compress (quality 7, audio, 30 fps), the trims, and the cancels (the
-  race on an audio-only input: a video transcode needs the main thread while
-  it runs). Its 9 tests pass on an Android 16 emulator; the dlct.7 sources
-  fail the trim and the race. On the emulator an output is up to 0.2 s off
-  the length asked for (AAC encoder padding; about half the decoded frames
-  reach the encoder, the last ones included), so lengths are checked to
-  ± 0.2 s there and each part's colours inside it.
-- CI: new job `Native integration tests (Android)` runs them on API 36 and
-  API 24 emulators and fails unless the report holds every `@Test` of the
-  class, passed (`native_tests/android/check_instrumentation_results.sh`).
-  `Native unit tests (Android)` also requires `ExportRangeTest` and
-  `EndTrimDataSourceTest`.
+  SSK's compress (quality 7, audio, 30 fps), an audio-only compress, the
+  trims, and the cancels (the race on an audio-only input: a video
+  transcode needs the main thread while it runs). Its 10 tests pass on an
+  Android 16 emulator; the dlct.7 sources fail the trim and the race there.
+  On an Android 7.0 emulator the 5 that need no video encoder pass, and the
+  audio-only compress fails without `MonotonicAudioDataSink`; the other 5
+  (`@RequiresVideoEncoder`) cannot run there, because that emulator's
+  software H.264 encoder crashes the media server in motion estimation on
+  every input. Android reports the 1 s fixtures' duration as 1000 ms on
+  Android 16 and 1067 ms on Android 7 (its extractor ignores the edit that
+  hides the AAC priming). On the Android 16 emulator an output is up to
+  0.2 s off the length asked for (AAC encoder padding; about half the
+  decoded frames reach the encoder, the last ones included), so lengths are
+  checked to ± 0.2 s there and each part's colours inside it.
+- CI: new job `Native integration tests (Android)` runs them on API 36 (all)
+  and API 24 (all but `@RequiresVideoEncoder`) emulators, prints the
+  plugin's and Transcoder's log lines on a failure, and fails unless the
+  report holds every `@Test` it should, passed
+  (`native_tests/android/check_instrumentation_results.sh`). `Native unit
+  tests (Android)` also requires `ExportRangeTest`, `EndTrimDataSourceTest`
+  and `MonotonicAudioDataSinkTest`.
 
 ## 3.1.5+dlct.7 (DLCT Fork)
 
