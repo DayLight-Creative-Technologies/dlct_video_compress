@@ -1,5 +1,5 @@
 // [DLCT] A minimal stand-in for the Flutter (iOS) API the plugin uses, so the
-// plugin's real Swift sources in ios/Classes compile and run as a
+// plugin's real Swift sources in ios/video_compress/Sources/video_compress compile and run as a
 // command-line program on a simulator (see run_ios.sh). Like the real
 // module, it re-exports UIKit.
 @_exported import UIKit

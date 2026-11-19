@@ -136,7 +136,7 @@ private func loadVideoComposition(_ asset: AVAsset, frameDuration: CMTime) -> AV
 
 // MARK: - Plugin
 
-public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
+public class VideoCompressPlugin: NSObject, FlutterPlugin {
     private let channelName = "video_compress"
     /// The compress running now, if any: what `cancelCompression` stops.
     /// Read and written on the main thread only.
@@ -150,7 +150,7 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "video_compress", binaryMessenger: registrar.messenger())
-        let instance = SwiftVideoCompressPlugin(channel: channel)
+        let instance = VideoCompressPlugin(channel: channel)
         registrar.addMethodCallDelegate(instance, channel: channel)
     }
 

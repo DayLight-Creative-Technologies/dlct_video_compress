@@ -1,6 +1,6 @@
 // [DLCT] Runs the plugin's real channel calls on each fixture and checks every
 // answer, on macOS (run_macos.sh: macos/Classes) and on an iOS simulator
-// (run_ios.sh: ios/Classes):
+// (run_ios.sh: ios/video_compress/Sources/video_compress):
 // - getMediaInfo: exactly one answer per call; an error for a file that
 //   cannot be read as media; the fields a file has, and none it lacks (never
 //   0); the filesize is the file's size in bytes; the orientation is the
@@ -44,7 +44,7 @@
 // Exits 1 on any failed check, or when no check ran.
 #if os(iOS)
 import Flutter
-typealias Plugin = SwiftVideoCompressPlugin
+typealias Plugin = VideoCompressPlugin
 let platform = "iOS"
 func osHasAsyncLoading() -> Bool {
     if #available(iOS 16.0, *) { return true }

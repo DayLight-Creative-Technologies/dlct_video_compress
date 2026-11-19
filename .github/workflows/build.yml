@@ -173,7 +173,7 @@ jobs:
         run: native_tests/media_info/run_macos.sh
 
   # [DLCT] The same checks, real compresses included, on the iOS plugin's
-  # real Swift sources (ios/Classes), compiled against a Flutter stand-in and
+  # real Swift sources (ios/video_compress/Sources/video_compress), compiled against a Flutter stand-in and
   # run inside
   # simulators of the newest and the oldest iOS runtime the runner has. The
   # script exits non-zero on any failed check, when a run reports no passed
@@ -227,11 +227,42 @@ jobs:
           flutter-version: ${{ matrix.sdk == 'min' && env.FLUTTER_MIN_SDK || '' }}
           channel: stable
       - run: flutter --version
+      # [DLCT] CocoaPods, explicitly: SSK builds this plugin from
+      # ios/video_compress.podspec until its SwiftPM cutover. The job below
+      # builds it through the Swift package.
+      - run: flutter config --no-enable-swift-package-manager
       - run: flutter pub get
         working-directory: example
       - name: Build example iOS app
         working-directory: example
         run: flutter build ios --no-codesign --simulator --debug
+
+  # [DLCT] The plugin's Swift package (ios/video_compress/Package.swift) built
+  # by Swift Package Manager in the example app. A plugin whose manifest
+  # Flutter cannot use falls back to CocoaPods silently, so the last step
+  # fails unless Flutter's generated plugin package links video_compress
+  # through its Swift package. SSK refuses a pin of this fork unless this job
+  # succeeded on the pinned commit; renaming it breaks that gate on purpose.
+  swiftpm-build-ios:
+    name: "SwiftPM build (iOS)"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          cache: true
+          channel: stable
+      - run: flutter --version
+      - run: flutter config --enable-swift-package-manager
+      - run: flutter pub get
+        working-directory: example
+      - name: Build example iOS app with Swift Package Manager
+        working-directory: example
+        run: flutter build ios --no-codesign --simulator --debug
+      - name: Fail unless video_compress linked through its Swift package
+        working-directory: example
+        run: |
+          grep -F '.product(name: "video-compress", package: "video_compress")' ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift
 
   build-macos:
     name: "Build macOS (${{ matrix.sdk }})"

@@ -1,3 +1,28 @@
+## 3.1.5+dlct.9 (DLCT Fork)
+
+The iOS plugin ships a Swift package, so an app that builds with Swift
+Package Manager links it without CocoaPods (SSK SWIFTPM-2026-001
+REQ-SWIFTPM-2026-001-009). Behaviour is unchanged.
+
+- `ios/video_compress/Package.swift` (tools 5.9, iOS 13.0, the
+  `FlutterFramework` path dependency, product `video-compress`), with the
+  Swift sources moved from `ios/Classes` to
+  `ios/video_compress/Sources/video_compress`, the Flutter plugin SwiftPM
+  layout. `ios/video_compress.podspec` compiles the same files, so a
+  CocoaPods build is unchanged.
+- The Objective-C shim (`VideoCompressPlugin.h/.m`, which only forwarded
+  `register` to `SwiftVideoCompressPlugin`) is gone: a Swift package target
+  cannot mix the two languages. The Swift class is now `VideoCompressPlugin`,
+  the `pluginClass` pubspec.yaml names, as on macOS.
+- `Utility.swift` imports Foundation: it compiled only because the pod's
+  umbrella header imported UIKit, and a Swift package has none.
+  `native_tests/media_info/run_ios.sh` builds the package's sources without
+  a bridging header, so a missing import fails it.
+- CI: `SwiftPM build (iOS)` builds the example with Swift Package Manager and
+  fails unless Flutter's generated plugin package links `video_compress`
+  through its Swift package; `Build iOS (min|stable)` builds with CocoaPods,
+  explicitly.
+
 ## 3.1.5+dlct.8 (DLCT Fork)
 
 `compressVideo` exports the part `startTime` and `duration` name, by one rule

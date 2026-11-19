@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# [DLCT] Compiles the iOS plugin's real Swift sources (ios/Classes) against
+# [DLCT] Compiles the iOS plugin's real Swift sources
+# (ios/video_compress/Sources/video_compress, the Swift package's target) against
 # the Flutter stand-in here, for the simulator at the pod's deployment target
 # (iOS 13.0), then runs main.swift's checks on the fixtures inside a fresh
 # simulator of the newest and of the oldest installed iOS runtime (one run
 # when they are the same). Each run covers every loading path its OS has
 # (main.swift). Exits non-zero when a check fails, no check ran, no runtime
 # is installed, or nothing could be built.
-# Usage: native_tests/media_info/run_ios.sh [classes dir]  (default: ios/Classes)
+# Usage: native_tests/media_info/run_ios.sh [sources dir]
+#   (default: ios/video_compress/Sources/video_compress)
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-classes="${1:-$here/../../ios/Classes}"
+classes="${1:-$here/../../ios/video_compress/Sources/video_compress}"
 target="$(uname -m)-apple-ios13.0-simulator"
 build="$(mktemp -d)"
 devices=()
@@ -23,15 +25,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Utility.swift imports nothing: in the pod it sees UIKit through the
-# module's umbrella header, which this bridging header stands in for.
-printf '#import <UIKit/UIKit.h>\n' > "$build/Bridge.h"
-
+# No bridging header: like the Swift package, which has no umbrella header,
+# every source file must import what it uses, so a missing import fails here.
 xcrun --sdk iphonesimulator swiftc -target "$target" -emit-module -emit-library -module-name Flutter \
   -emit-module-path "$build/Flutter.swiftmodule" \
   -o "$build/libFlutter.dylib" "$here/Flutter.swift"
 
-xcrun --sdk iphonesimulator swiftc -target "$target" -import-objc-header "$build/Bridge.h" \
+xcrun --sdk iphonesimulator swiftc -target "$target" \
   -I "$build" -L "$build" -lFlutter \
   -Xlinker -rpath -Xlinker "$build" -o "$build/media_info" \
   "$here/main.swift" "$classes"/*.swift
