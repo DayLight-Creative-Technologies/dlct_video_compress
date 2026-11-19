@@ -4,14 +4,15 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.12.0
-  flutter: '>=3.44.0'
+  sdk: ^3.13.0
+  flutter: '>=3.47.0'
 
 dependencies:
   flutter:
     sdk: flutter
   file_selector: ^1.1.0
   image_picker: ^1.2.3
+  material_ui: ^1.11.0
   video_compress:
     path: ../
 

@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:video_compress_example/main.dart';
 

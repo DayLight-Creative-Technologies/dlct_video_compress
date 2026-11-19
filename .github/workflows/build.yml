@@ -22,13 +22,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # This is Dart 3.12.0. The floor is Flutter 3.44: android/build.gradle no
-  # longer applies kotlin-android and declares a top-level
-  # `kotlin { compilerOptions {} }` block (built-in Kotlin migration,
-  # 3.1.5+dlct.1). Flutter's Gradle plugin applies KGP to plugin modules
-  # itself only from 3.44 on, and 3.44 is the first release that builds the
-  # example's AGP 9 (android.builtInKotlin=false) on Gradle 9.1.
-  FLUTTER_MIN_SDK: '3.44.0'
+  # This is Dart 3.13.0. The floor is Flutter 3.47 (3.1.5+dlct.9): the first
+  # release with package:material_ui, which the example uses because 3.47
+  # deprecated package:flutter/material.dart. The built-in Kotlin migration
+  # (3.1.5+dlct.1) needs 3.44 or later; the example's AGP 9
+  # (android.builtInKotlin=false) builds on Gradle 9.3.1, the lowest Gradle
+  # Flutter 3.50 accepts.
+  FLUTTER_MIN_SDK: '3.47.0'
 
 jobs:
   lint:

@@ -22,6 +22,16 @@ REQ-SWIFTPM-2026-001-009). Behaviour is unchanged.
   fails unless Flutter's generated plugin package links `video_compress`
   through its Swift package; `Build iOS (min|stable)` builds with CocoaPods,
   explicitly.
+- Toolchain, so the existing CI builds again on Flutter 3.50 (the dlct.9 push
+  failed `Check linting`, `Native unit tests (Android)`, `Native integration
+  tests (Android)` and `Build Android (stable)` on it, none from this change):
+  Flutter 3.47 deprecated `package:flutter/material.dart`, so
+  `video_compressor.dart` imports `package:flutter/foundation.dart` (it uses
+  only `debugPrint`) and the example uses `package:material_ui`; the floor
+  (pubspec.yaml, the example's, CI's `FLUTTER_MIN_SDK`) is Flutter 3.47.0 /
+  Dart 3.13.0, the first release with `material_ui`. Flutter 3.50 refuses AGP
+  below 9.1.1 and Gradle below 9.3.1: the example builds on AGP 9.2.1,
+  Kotlin 2.4.21 and Gradle 9.4.1, SocialScoreKeeper's own Android toolchain.
 
 ## 3.1.5+dlct.8 (DLCT Fork)
 
